@@ -1,0 +1,20 @@
+{
+	"author": [
+        "ComradeCactus",
+		"aikaterna",
+		"trustyJAID",
+        "Redjumpman"
+	],
+	"description": "check someone's vibe and get recommendations on how to fix it, also aikaterna and trustyjaid are rad af",
+    "install_msg": "redbot vibe check: passed\nusage: `[p]checkvibe <user>`",
+	"short": "check some vibes",
+	"tags": [
+		"data",
+        "vibe check",
+        "activity"
+	],
+	"requirements": [
+		"requests"
+	],
+	"type": "COG"
+}
