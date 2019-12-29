@@ -64,12 +64,18 @@ class VibeCheck(BaseCog):
 
         #I did this because it breaks when I have my name set to unicode shit it's kinda funny but also not
         if user == None:
-            user = ctx.message.author.id
+            user = ctx.message.author
+            userid = ctx.message.author.id
         else:
-            user = user.id
+            userid = user.id
 
         vibedata = []
         textchannels = []
+
+        if checklimit < 100:
+            await em.delete()
+            await ctx.send("needs to be more than 100 messages my dude")
+            return
 
         #it was 4am and I didn't want to do this right so this is Good Enough(tm)
         try:
@@ -78,8 +84,8 @@ class VibeCheck(BaseCog):
                     textchannels.append(channel)
 
             for channel in textchannels:
-                async for msg in channel.history(checklimit):
-                    if msg.author.id == user:
+                async for msg in channel.history(limit=checklimit):
+                    if msg.author.id == userid:
                         if "checkvibe" in msg.content:
                             pass
                         else:
@@ -143,7 +149,6 @@ class VibeCheck(BaseCog):
 
         await em.delete()
         
-        emb2 = discord.Embed(description="vibe check: {}\n\ni'm pickin up {}% {}\nand {}% {} {}".format(vcresult, tone1score, tone1id, tone2score, tone2id, sadboi), colour=color)
+        emb2 = discord.Embed(description="{}'s vibe check: {}\n\ni'm pickin up {}% {}\nand {}% {} {}".format(user.mention, vcresult, tone1score, tone1id, tone2score, tone2id, sadboi), colour=color)
         emb2.set_thumbnail(url=tnurl)
         em2 = await ctx.send(embed=emb2)
-        #print(vibedata)
