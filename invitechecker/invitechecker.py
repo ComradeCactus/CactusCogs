@@ -84,16 +84,27 @@ class InviteChecker(Cog):
         await ctx.maybe_send_embed(msg)
 
     @invitelogger.command()
-    @checks.mod_or_permissions(administrator=True)
+    @checks.is_owner()
     async def dev(self, member: discord.Member):
         guild = member.guild
+        member = member.author
         channel = guild.get_channel(await self.config.guild(guild).channel())
         fileinvites = await self.config.guild(guild).invitelinks()
         newinvites = self.make_invite_dict(await guild.invites())
         difference = DeepDiff(fileinvites,newinvites)
         invcode = ""
         if difference == {}:
-            await channel.send("No changes.")
+            sendstr = "{} {} joined but I couldn't detect the invite, probably used a custom URL.".format(
+                member, member.id
+            )
+            if await self.bot.embed_requested(channel, member):
+                    await channel.send(
+                        embed=discord.Embed(
+                            description=sendstr, color=(await self.bot.get_embed_color(channel))
+                        )
+                    )
+            else:
+                await channel.send(sendstr)
             return
         for invite in difference['values_changed']:
             invite = invite.replace("root['","")
@@ -121,7 +132,17 @@ class InviteChecker(Cog):
         difference = DeepDiff(fileinvites,newinvites)
         invcode = ""
         if difference == {}:
-            await channel.send("No changes.")
+            sendstr = "{} {} joined but I couldn't detect the invite, probably used a custom URL.".format(
+                member, member.id
+            )
+            if await self.bot.embed_requested(channel, member):
+                    await channel.send(
+                        embed=discord.Embed(
+                            description=sendstr, color=(await self.bot.get_embed_color(channel))
+                        )
+                    )
+            else:
+                await channel.send(sendstr)
             return
         for invite in difference['values_changed']:
             invite = invite.replace("root['","")
