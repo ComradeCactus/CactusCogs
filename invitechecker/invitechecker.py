@@ -44,6 +44,7 @@ class InviteChecker(Cog):
             pass
 
     @invitelogger.command()
+    @checks.mod_or_permissions(administrator=True)
     async def setchannel(self, ctx: Context, chan: discord.TextChannel):
         """Choose the channel to send invite log messages to"""
         guild = ctx.guild
@@ -54,6 +55,7 @@ class InviteChecker(Cog):
             await ctx.maybe_send_embed("Invalid channel, please try again.")
 
     @invitelogger.command()
+    @checks.mod_or_permissions(administrator=True)
     async def getchannel(self, ctx: Context):
         """Get the channel the logger will post to."""
         guild = ctx.guild
@@ -61,6 +63,7 @@ class InviteChecker(Cog):
         await ctx.maybe_send_embed("Current channel is: <#" + str(current)  + ">")
 
     @invitelogger.command()
+    @checks.mod_or_permissions(administrator=True)
     async def syncinvites(self, ctx: Context):
         """Synchronize the config file with live data."""
         guild = ctx.guild
@@ -70,6 +73,7 @@ class InviteChecker(Cog):
         await ctx.maybe_send_embed("Successfully synchronized invites to JSON file.")
 
     @invitelogger.command()
+    @checks.mod_or_permissions(administrator=True)
     async def stats(self, ctx:Context):
         """Get current invite stats saved in the file."""
         guild = ctx.guild
@@ -80,6 +84,7 @@ class InviteChecker(Cog):
         await ctx.maybe_send_embed(msg)
 
     @invitelogger.command()
+    @checks.mod_or_permissions(administrator=True)
     async def dev(self, member: discord.Member):
         guild = member.guild
         channel = guild.get_channel(await self.config.guild(guild).channel())
