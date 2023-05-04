@@ -8,7 +8,7 @@ from redbot.core.commands import Cog, Context
 
 
 class InviteChecker(Cog):
-    """check your vibe, my dude"""
+    """Check which invites people are using"""
 
     def __init__(self, bot: Red):
         super().__init__()
@@ -18,13 +18,13 @@ class InviteChecker(Cog):
         "invitelinks": []
         }
 
-        self.config.register_guild(**default_guild)
+        self.config.register_guild(**default_guild)  
 
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete"""
         return
-    
+
     def make_invite_dict(self, invites):
         storedinvites = "{"
         for invite in invites:
@@ -97,7 +97,7 @@ class InviteChecker(Cog):
             sendstr = "{} {} joined but I couldn't detect the invite, probably used a custom URL.".format(
                 member, member.id
             )
-            if await self.bot.embed_requested(channel, member):
+            if await self.bot.embed_requested(channel):
                     await channel.send(
                         embed=discord.Embed(
                             description=sendstr, color=(await self.bot.get_embed_color(channel))
@@ -113,7 +113,7 @@ class InviteChecker(Cog):
         output = "{} joined using invite: {}".format(
             member, invcode
         )
-        if await self.bot.embed_requested(channel, member):
+        if await self.bot.embed_requested(channel):
             await channel.send(
                 embed=discord.Embed(
                     description=output, color=(await self.bot.get_embed_color(channel))
@@ -135,7 +135,7 @@ class InviteChecker(Cog):
             sendstr = "{} {} joined but I couldn't detect the invite, probably used a custom URL.".format(
                 member, member.id
             )
-            if await self.bot.embed_requested(channel, member):
+            if await self.bot.embed_requested(channel):
                     await channel.send(
                         embed=discord.Embed(
                             description=sendstr, color=(await self.bot.get_embed_color(channel))
@@ -151,7 +151,7 @@ class InviteChecker(Cog):
         output = "{} joined using invite: {}".format(
             member, invcode
         )
-        if await self.bot.embed_requested(channel, member):
+        if await self.bot.embed_requested(channel):
             await channel.send(
                 embed=discord.Embed(
                     description=output, color=(await self.bot.get_embed_color(channel))
