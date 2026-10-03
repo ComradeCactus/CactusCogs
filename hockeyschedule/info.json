@@ -1,0 +1,17 @@
+{
+	"author": [
+        "ComradeCactus"
+	],
+	"description": "respond with a random image from a list, when a command is issued",
+    "install_msg": "use `[p]imageresponder initialize` in your server to set up the cog",
+	"short": "spam images I suppose",
+	"tags": [
+		"welcome",
+        "responder",
+        "yes"
+	],
+	"requirements": [
+		"PIL"
+	],
+	"type": "COG"
+}

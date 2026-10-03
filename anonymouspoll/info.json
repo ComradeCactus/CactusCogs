@@ -1,0 +1,11 @@
+{
+    "author": ["ComradeCactus"],
+    "name": "anonymouspoll",
+    "short": "Post a native Discord poll with a command.",
+    "description": "Start a native Discord poll in the current channel using a slash command.",
+    "install_msg": "Use `/anonymouspoll` (pop-up form) or `/anonymouspoll-text` to start a poll without showing who started it. Admins can use `/anonymouspoll-log` to log poll starters to a channel. Requires discord.py 2.7+ (Red 3.5.24+).",
+    "requirements": [],
+    "tags": ["poll", "utility"],
+    "min_python_version": [3, 8, 0],
+    "end_user_data_statement": "This cog does not persistently store data about users."
+}

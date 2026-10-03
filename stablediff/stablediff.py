@@ -16,6 +16,7 @@ class StableDiff(commands.Cog):
         self.config = Config.get_conf(self, identifier=98237409834)
         default_global = {
             "stablediffhost" : "NOTSET",
+            "sdxl" : False,
         }
 
         self.config.register_global(**default_global)
@@ -37,6 +38,19 @@ class StableDiff(commands.Cog):
         """Set the stable-diffusion-webui host"""
         await self.config.stablediffhost.set(host)
         await ctx.send("Set host to {}".format(host), ephemeral=True)
+    
+    @webui.command("sdxl", description="Toggle SDXL mode")
+    async def sdxl(self, ctx: commands.Context, mode: Optional[bool] = None):
+        """Toggle SDXL mode"""
+        if mode is None:
+            current = await self.config.sdxl()
+            await ctx.send("SDXL mode set to {}".format(current), ephemeral=True)
+        if mode is True:
+            await self.config.sdxl.set(True)
+            await ctx.send("SDXL mode set to {}".format(True), ephemeral=True)
+        if mode is False:
+            await self.config.sdxl.set(False)
+            await ctx.send("SDXL mode set to {}".format(False), ephemeral=True)
     
     @commands.hybrid_group(name="generate", 
                            aliases=["stablediffusion","sd"], 
@@ -69,13 +83,20 @@ class StableDiff(commands.Cog):
 
         origmessage = ctx.message
         stablediffhost = await self.config.stablediffhost()
+        sdxlmode = await self.config.sdxl()
         if stablediffhost.endswith("/"):
             stablediffhost = stablediffhost[:-1]
         txt2img = stablediffhost + "/agent-scheduler/v1/queue/txt2img"
         taskquery = stablediffhost + "/agent-scheduler/v1/results/"
         queuequery = stablediffhost + "/agent-scheduler/v1/queue/"
         #await ctx.send("Sending request to {} with prompts: {}, {}".format(txt2img,positiveprompt, negativeprompt), ephemeral=True)
-        prompt = {'prompt': positiveprompt, 'negative_prompt': negativeprompt, 'seed': seed, 'sampler_name': sampler}
+        if sdxlmode: 
+            width = 1024
+            height = 1024
+        else: 
+            width = 512
+            height = 512
+        prompt = {'prompt': positiveprompt, 'negative_prompt': negativeprompt, 'seed': seed, 'sampler_name': sampler, 'width': width, 'height': height, 'steps': 30}
         response = requests.post(txt2img, json=prompt)
 
         try:
