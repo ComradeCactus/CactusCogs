@@ -52,6 +52,14 @@ _SCHEMA_VERSION: Final[int] = 2
 LOTTO_TICKET_PRICE: Final[int] = 50
 LOTTO_UNORDERED_JACKPOT: Final[int] = 1_000_000
 LOTTO_EXACT_JACKPOT: Final[int] = 10_000_000
+LOTTO_THREE_ORDERED_PRIZE: Final[int] = 150_000
+LOTTO_THREE_ANY_PRIZE: Final[int] = 50_000
+LOTTO_TIER_LABELS: Final[dict] = {
+    "exact": "the exact-order jackpot",
+    "unordered": "the any-order jackpot",
+    "three_ordered": "matching 3 in order",
+    "three_any": "matching 3 numbers",
+}
 
 
 class Casino(Database, commands.Cog):
@@ -722,7 +730,7 @@ class Casino(Database, commands.Cog):
         if custom_numbers is not None:
             tickets_to_add.append(custom_numbers)
         tickets_to_add.extend(
-            quick_pick() for _ in range(ticket_count - len(tickets_to_add))
+            quick_pick() for __ in range(ticket_count - len(tickets_to_add))
         )
 
         try:
@@ -731,7 +739,7 @@ class Casino(Database, commands.Cog):
             return await ctx.send(_("You do not have enough credits for that purchase."))
 
         try:
-            draw_date, _ = await self.lotto_store.add_tickets(
+            draw_date, __ = await self.lotto_store.add_tickets(
                 ctx.guild.id,
                 draw_time,
                 ctx.author.id,
@@ -897,7 +905,9 @@ class Casino(Database, commands.Cog):
             "**Next drawing:** <t:{3}:F> (<t:{3}:R>)\n"
             "**Ticket price:** {4} credits\n"
             "**Any-order jackpot:** {5} credits\n"
-            "**Exact-order jackpot:** {6} credits"
+            "**Exact-order jackpot:** {6} credits\n"
+            "**Match 3 in order (anywhere):** {7} credits each\n"
+            "**Match 3 (any order):** {8} credits each"
         ).format(
             draw_time_text,
             channel_text,
@@ -906,6 +916,8 @@ class Casino(Database, commands.Cog):
             humanize_number(LOTTO_TICKET_PRICE),
             humanize_number(LOTTO_UNORDERED_JACKPOT),
             humanize_number(LOTTO_EXACT_JACKPOT),
+            humanize_number(LOTTO_THREE_ORDERED_PRIZE),
+            humanize_number(LOTTO_THREE_ANY_PRIZE),
         )
 
     async def lotto_scheduler(self):
@@ -1014,14 +1026,20 @@ class Casino(Database, commands.Cog):
             )
             await message.edit(embed=embed)
 
-        exact, unordered = classify_tickets(tickets, drawn_numbers)
+        winners = classify_tickets(tickets, drawn_numbers)
         awards = {}
-        tiers = (
-            ("exact", exact, LOTTO_EXACT_JACKPOT),
-            ("unordered", unordered, LOTTO_UNORDERED_JACKPOT),
-        )
-        for tier, winning_tickets, jackpot in tiers:
-            for ticket, amount in split_jackpot(jackpot, winning_tickets):
+        # Jackpots are split between winning tickets; the smaller prizes are paid per ticket.
+        payouts = [
+            ("exact", split_jackpot(LOTTO_EXACT_JACKPOT, winners["exact"])),
+            ("unordered", split_jackpot(LOTTO_UNORDERED_JACKPOT, winners["unordered"])),
+            (
+                "three_ordered",
+                [(t, LOTTO_THREE_ORDERED_PRIZE) for t in winners["three_ordered"]],
+            ),
+            ("three_any", [(t, LOTTO_THREE_ANY_PRIZE) for t in winners["three_any"]]),
+        ]
+        for tier, ticket_amounts in payouts:
+            for ticket, amount in ticket_amounts:
                 ticket_id = ticket["ticket_id"]
                 settlement = drawing["settlements"].get(ticket_id)
                 if settlement is None:
@@ -1037,7 +1055,11 @@ class Casino(Database, commands.Cog):
                     pending = settlement["pending"]
                 award = awards.setdefault(
                     ticket["user_id"],
-                    {"exact_paid": 0, "exact_pending": 0, "unordered_paid": 0, "unordered_pending": 0},
+                    {
+                        key: 0
+                        for name in LOTTO_TIER_LABELS
+                        for key in (name + "_paid", name + "_pending")
+                    },
                 )
                 award["{}_paid".format(tier)] += paid
                 award["{}_pending".format(tier)] += pending
@@ -1049,19 +1071,14 @@ class Casino(Database, commands.Cog):
             lines = []
             for user_id, award in sorted(awards.items()):
                 details = []
-                if award["exact_paid"]:
-                    details.append(
-                        _("{} credits for the exact-order jackpot").format(
-                            humanize_number(award["exact_paid"])
+                for name, label in LOTTO_TIER_LABELS.items():
+                    if award[name + "_paid"]:
+                        details.append(
+                            _("{} credits for {}").format(
+                                humanize_number(award[name + "_paid"]), _(label)
+                            )
                         )
-                    )
-                if award["unordered_paid"]:
-                    details.append(
-                        _("{} credits for the any-order jackpot").format(
-                            humanize_number(award["unordered_paid"])
-                        )
-                    )
-                pending = award["exact_pending"] + award["unordered_pending"]
+                pending = sum(award[name + "_pending"] for name in LOTTO_TIER_LABELS)
                 if pending:
                     details.append(
                         _("{} credits are pending due to an account balance limit").format(
