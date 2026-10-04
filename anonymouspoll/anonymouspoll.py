@@ -1,21 +1,26 @@
+import asyncio
 import time
-from datetime import timedelta
 from typing import Optional
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 from redbot.core import Config, commands
 
 DURATION_CHOICES = [
-    app_commands.Choice(name=name, value=hours)
-    for name, hours in (
-        ("1 hour", 1),
-        ("4 hours", 4),
-        ("8 hours", 8),
-        ("24 hours", 24),
-        ("3 days", 72),
-        ("1 week", 168),
-        ("2 weeks", 336),
+    app_commands.Choice(name=name, value=minutes)
+    for name, minutes in (
+        ("5 minutes", 5),
+        ("10 minutes", 10),
+        ("30 minutes", 30),
+        ("1 hour", 60),
+        ("2 hours", 120),
+        ("4 hours", 240),
+        ("8 hours", 480),
+        ("24 hours", 1440),
+        ("3 days", 4320),
+        ("1 week", 10080),
+        ("2 weeks", 20160),
     )
 ]
 
@@ -25,12 +30,73 @@ CHOICES_PER_STEP = 5
 POLL_COOLDOWN_SECONDS = 3600
 
 
+BAR_WIDTH = 24
+VOTE_NOTICE_SECONDS = 30
+
+
+def vote_counts(poll):
+    counts = [0] * len(poll["options"])
+    for choices in poll["votes"].values():
+        for i in choices:
+            counts[i] += 1
+    return counts
+
+
+def poll_embed(poll, final=False):
+    counts = vote_counts(poll)
+    voters = len(poll["votes"])
+    top = max(counts)
+    lines = []
+    for n, (option, count) in enumerate(zip(poll["options"], counts), 1):
+        share = count / voters if voters else 0
+        filled = round(share * BAR_WIDTH)
+        bar = "\u2593" * filled + "\u2591" * (BAR_WIDTH - filled)
+        crown = " \N{TROPHY}" if final and top and count == top else ""
+        lines.append(f"{n}. {option}{crown}\n`{bar}` {count} ({share:.0%})")
+    embed = discord.Embed(
+        title=poll["question"],
+        description="\n\n".join(lines),
+        colour=discord.Colour.dark_grey() if final else discord.Colour.blurple(),
+    )
+    kind = "Multiple answers allowed" if poll["multiple"] else "Pick one"
+    status = "Poll closed" if final else f"Ends <t:{int(poll['end'])}:R>"
+    embed.description += f"\n\n{status}"
+    embed.set_footer(text=f"{voters} voter{'s' if voters != 1 else ''} | {kind}")
+    return embed
+
+
+class VoteButton(discord.ui.DynamicItem[discord.ui.Button], template=r"anonpoll:vote:(?P<index>\d+)"):
+    """Persistent vote button. Which poll it belongs to comes from the message it's on."""
+
+    def __init__(self, index, label="Vote"):
+        super().__init__(
+            discord.ui.Button(
+                label=label[:80], custom_id=f"anonpoll:vote:{index}", style=discord.ButtonStyle.primary
+            )
+        )
+        self.index = index
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["index"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.client.get_cog("AnonymousPoll")._vote(interaction, self.index)
+
+
+def vote_view(options):
+    view = discord.ui.View(timeout=None)
+    for i, option in enumerate(options):
+        view.add_item(VoteButton(i, f"{i + 1}. {option}"))
+    return view
+
+
 class PollState:
     """Poll details collected across the form's steps."""
 
     def __init__(self):
         self.question = ""
-        self.duration = 24
+        self.duration = 1440
         self.multiple = False
         self.count = 2
         self.options = ["", ""]
@@ -180,13 +246,100 @@ class PreviewView(discord.ui.View):
 
 
 class AnonymousPoll(commands.Cog):
-    """Start native Discord polls without revealing who started them."""
+    """Start polls without revealing who started them or who voted for what."""
 
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=7310294856123, force_registration=True)
         self.config.register_guild(log_channel=None)
+        # message id (str) -> poll dict; kept in config so polls survive restarts
+        self.config.register_global(polls={})
         self._last_poll = {}  # user id -> monotonic time of their last posted poll
+        self._lock = asyncio.Lock()
+        self._tasks = set()
+
+    async def cog_load(self):
+        self.bot.add_dynamic_items(VoteButton)
+        self.check_polls.start()
+
+    async def cog_unload(self):
+        self.check_polls.cancel()
+        self.bot.remove_dynamic_items(VoteButton)
+
+    @tasks.loop(seconds=30)
+    async def check_polls(self):
+        now = time.time()
+        polls = await self.config.polls()
+        for message_id, poll in polls.items():
+            if poll["end"] <= now:
+                await self._finish(message_id)
+
+    @check_polls.before_loop
+    async def before_check_polls(self):
+        await self.bot.wait_until_red_ready()
+
+    async def _vote(self, interaction, index):
+        async with self._lock:
+            polls = await self.config.polls()
+            poll = polls.get(str(interaction.message.id))
+            if poll is None or poll["end"] <= time.time():
+                await interaction.response.send_message("This poll has ended.", ephemeral=True)
+                return
+            user = str(interaction.user.id)
+            current = poll["votes"].get(user, [])
+            if poll["multiple"]:
+                current = [i for i in current if i != index] if index in current else current + [index]
+            else:
+                current = [] if current == [index] else [index]
+            if current:
+                poll["votes"][user] = current
+            else:
+                poll["votes"].pop(user, None)
+            await self.config.polls.set(polls)
+        await interaction.response.edit_message(embed=poll_embed(poll))
+        if current:
+            chosen = ", ".join(poll["options"][i] for i in sorted(current))
+            msg = f"Your vote: **{chosen}**"
+        else:
+            msg = "Your vote has been removed."
+        msg += f"\n-# This message will self-destruct <t:{int(time.time()) + VOTE_NOTICE_SECONDS}:R>."
+        notice = await interaction.followup.send(msg, ephemeral=True, wait=True)
+        task = asyncio.create_task(self._delete_later(notice))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _delete_later(self, message):
+        await asyncio.sleep(VOTE_NOTICE_SECONDS)
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            pass
+
+    async def _finish(self, message_id):
+        async with self._lock:
+            polls = await self.config.polls()
+            poll = polls.pop(message_id, None)
+            if poll is None:
+                return
+            await self.config.polls.set(polls)
+        channel = self.bot.get_channel(poll["channel"])
+        if channel is None:
+            return
+        message = None
+        try:
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(embed=poll_embed(poll, final=True), view=None)
+        except discord.HTTPException:
+            pass
+        results = poll_embed(poll, final=True)
+        results.title = f"Poll results: {poll['question']}"
+        try:
+            await channel.send(
+                embed=results,
+                reference=message.to_reference(fail_if_not_exists=False) if message else None,
+            )
+        except discord.HTTPException:
+            pass
 
     def _cooldown_message(self, user_id) -> Optional[str]:
         last = self._last_poll.get(user_id)
@@ -219,7 +372,7 @@ class AnonymousPoll(commands.Cog):
     )
     @app_commands.choices(duration=DURATION_CHOICES)
     @app_commands.guild_only()
-    @app_commands.checks.bot_has_permissions(send_messages=True, send_polls=True)
+    @app_commands.checks.bot_has_permissions(send_messages=True, embed_links=True)
     async def anonymouspoll_text(
         self,
         interaction: discord.Interaction,
@@ -234,7 +387,7 @@ class AnonymousPoll(commands.Cog):
         answer8: Optional[app_commands.Range[str, 1, 55]] = None,
         answer9: Optional[app_commands.Range[str, 1, 55]] = None,
         answer10: Optional[app_commands.Range[str, 1, 55]] = None,
-        duration: int = 24,
+        duration: int = 1440,
         multiple: bool = False,
     ):
         cooldown = self._cooldown_message(interaction.user.id)
@@ -263,7 +416,7 @@ class AnonymousPoll(commands.Cog):
         description="Start a poll without showing your name, using a pop-up form.",
     )
     @app_commands.guild_only()
-    @app_commands.checks.bot_has_permissions(send_messages=True, send_polls=True)
+    @app_commands.checks.bot_has_permissions(send_messages=True, embed_links=True)
     async def anonymouspoll(self, interaction: discord.Interaction):
         cooldown = self._cooldown_message(interaction.user.id)
         if cooldown:
@@ -280,19 +433,23 @@ class AnonymousPoll(commands.Cog):
                 await interaction.response.send_message(cooldown, ephemeral=True)
             return
 
-        poll = discord.Poll(
-            question=question,
-            duration=timedelta(hours=duration),
-            multiple=multiple,
-        )
-        for option in options:
-            poll.add_answer(text=option)
+        poll = {
+            "question": question,
+            "options": options,
+            "multiple": multiple,
+            "end": time.time() + duration * 60,
+            "channel": interaction.channel.id,
+            "votes": {},
+        }
 
         # Post via the channel (not the interaction) so Discord doesn't attribute the poll to the invoker.
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
         await interaction.channel.send("Someone has requested a poll!")
-        message = await interaction.channel.send(poll=poll)
+        async with self._lock:
+            message = await interaction.channel.send(embed=poll_embed(poll), view=vote_view(options))
+            async with self.config.polls() as polls:
+                polls[str(message.id)] = poll
         self._last_poll[interaction.user.id] = time.monotonic()
         if interaction.message is not None:
             await interaction.edit_original_response(content="Your poll has been posted!")
