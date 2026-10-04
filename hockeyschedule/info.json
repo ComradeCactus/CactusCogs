@@ -10,8 +10,6 @@
         "responder",
         "yes"
 	],
-	"requirements": [
-		"PIL"
-	],
+	"requirements": [],
 	"type": "COG"
 }

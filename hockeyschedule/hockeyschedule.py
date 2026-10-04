@@ -80,7 +80,11 @@ class HockeySchedule(commands.Cog):
             if ctx is None:
                 return
             if isinstance(ctx, discord.Interaction):
-                await ctx.response.send_message(message, ephemeral=True)
+                # Only one initial response is allowed; later messages are follow-ups
+                if ctx.response.is_done():
+                    await ctx.followup.send(message, ephemeral=True)
+                else:
+                    await ctx.response.send_message(message, ephemeral=True)
             else:
                 await ctx.send(message)
 
