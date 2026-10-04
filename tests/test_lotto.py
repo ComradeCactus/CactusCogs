@@ -42,17 +42,31 @@ def test_quick_picks_and_draws_contain_six_unique_numbers():
         assert all(0 <= number <= 99 for number in numbers)
 
 
-def test_winner_tiers_require_all_numbers_and_prefer_exact_order():
+def test_winner_tiers_prefer_the_highest_prize():
+    draw = [1, 2, 3, 4, 5, 6]
     exact_ticket = {"numbers": [1, 2, 3, 4, 5, 6]}
     unordered_ticket = {"numbers": [6, 5, 4, 3, 2, 1]}
-    non_winner = {"numbers": [1, 2, 3, 4, 5, 7]}
+    ordered_three = {"numbers": [1, 20, 3, 30, 6, 40]}
+    ordered_four_shifted = {"numbers": [90, 2, 4, 5, 6, 91]}
+    any_three = {"numbers": [6, 5, 4, 70, 71, 72]}
+    two_matches = {"numbers": [1, 2, 80, 81, 82, 83]}
 
-    exact, unordered = classify_tickets(
-        [exact_ticket, unordered_ticket, non_winner], [1, 2, 3, 4, 5, 6]
+    tiers = classify_tickets(
+        [
+            exact_ticket,
+            unordered_ticket,
+            ordered_three,
+            ordered_four_shifted,
+            any_three,
+            two_matches,
+        ],
+        draw,
     )
 
-    assert exact == [exact_ticket]
-    assert unordered == [unordered_ticket]
+    assert tiers["exact"] == [exact_ticket]
+    assert tiers["unordered"] == [unordered_ticket]
+    assert tiers["three_ordered"] == [ordered_three, ordered_four_shifted]
+    assert tiers["three_any"] == [any_three]
 
 
 def test_jackpot_is_split_equally_with_remainder_preserved():

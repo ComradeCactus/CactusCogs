@@ -37,20 +37,36 @@ def draw_numbers():
     return random.SystemRandom().sample(range(100), 6)
 
 
+def _longest_common_order(numbers, drawn):
+    """Length of the longest run of shared numbers appearing in the same relative order."""
+    table = [[0] * (len(drawn) + 1) for _ in range(len(numbers) + 1)]
+    for i, number in enumerate(numbers, 1):
+        for j, drawn_number in enumerate(drawn, 1):
+            if number == drawn_number:
+                table[i][j] = table[i - 1][j - 1] + 1
+            else:
+                table[i][j] = max(table[i - 1][j], table[i][j - 1])
+    return table[-1][-1]
+
+
 def classify_tickets(tickets, drawn_numbers):
+    """Sort tickets into their single highest prize tier."""
     drawn = tuple(drawn_numbers)
     drawn_set = set(drawn)
-    exact = []
-    unordered = []
+    tiers = {"exact": [], "unordered": [], "three_ordered": [], "three_any": []}
 
     for ticket in tickets:
         numbers = tuple(ticket["numbers"])
         if numbers == drawn:
-            exact.append(ticket)
+            tiers["exact"].append(ticket)
         elif set(numbers) == drawn_set:
-            unordered.append(ticket)
+            tiers["unordered"].append(ticket)
+        elif _longest_common_order(numbers, drawn) >= 3:
+            tiers["three_ordered"].append(ticket)
+        elif len(drawn_set.intersection(numbers)) >= 3:
+            tiers["three_any"].append(ticket)
 
-    return exact, unordered
+    return tiers
 
 
 def split_jackpot(amount, tickets):
