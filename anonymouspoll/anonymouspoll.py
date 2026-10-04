@@ -45,10 +45,11 @@ def vote_counts(poll):
 def poll_embed(poll, final=False):
     counts = vote_counts(poll)
     voters = len(poll["votes"])
+    total = sum(counts)
     top = max(counts)
     lines = []
     for n, (option, count) in enumerate(zip(poll["options"], counts), 1):
-        share = count / voters if voters else 0
+        share = count / total if total else 0
         filled = round(share * BAR_WIDTH)
         bar = "\u2593" * filled + "\u2591" * (BAR_WIDTH - filled)
         crown = " \N{TROPHY}" if final and top and count == top else ""
@@ -61,7 +62,11 @@ def poll_embed(poll, final=False):
     kind = "Multiple answers allowed" if poll["multiple"] else "Pick one"
     status = "Poll closed" if final else f"Ends <t:{int(poll['end'])}:R>"
     embed.description += f"\n\n{status}"
-    embed.set_footer(text=f"{voters} voter{'s' if voters != 1 else ''} | {kind}")
+    if poll["multiple"]:
+        tally = f"{total} total vote{'s' if total != 1 else ''}"
+    else:
+        tally = f"{voters} voter{'s' if voters != 1 else ''}"
+    embed.set_footer(text=f"{tally} | {kind}")
     return embed
 
 
@@ -256,7 +261,7 @@ class AnonymousPoll(commands.Cog):
         self.config.register_global(polls={})
         self._last_poll = {}  # user id -> monotonic time of their last posted poll
         self._lock = asyncio.Lock()
-        self._tasks = set()
+        self._notices = {}  # (poll message id, user id) -> (ephemeral notice, delete task)
 
     async def cog_load(self):
         self.bot.add_dynamic_items(VoteButton)
@@ -264,6 +269,8 @@ class AnonymousPoll(commands.Cog):
 
     async def cog_unload(self):
         self.check_polls.cancel()
+        for _, task in self._notices.values():
+            task.cancel()
         self.bot.remove_dynamic_items(VoteButton)
 
     @tasks.loop(seconds=30)
@@ -303,13 +310,23 @@ class AnonymousPoll(commands.Cog):
         else:
             msg = "Your vote has been removed."
         msg += f"\n-# This message will self-destruct <t:{int(time.time()) + VOTE_NOTICE_SECONDS}:R>."
-        notice = await interaction.followup.send(msg, ephemeral=True, wait=True)
-        task = asyncio.create_task(self._delete_later(notice))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        key = (interaction.message.id, interaction.user.id)
+        notice = None
+        old = self._notices.pop(key, None)
+        if old is not None:
+            old_message, old_task = old
+            old_task.cancel()
+            try:
+                notice = await old_message.edit(content=msg)
+            except discord.HTTPException:
+                pass
+        if notice is None:
+            notice = await interaction.followup.send(msg, ephemeral=True, wait=True)
+        self._notices[key] = (notice, asyncio.create_task(self._delete_later(key, notice)))
 
-    async def _delete_later(self, message):
+    async def _delete_later(self, key, message):
         await asyncio.sleep(VOTE_NOTICE_SECONDS)
+        self._notices.pop(key, None)
         try:
             await message.delete()
         except discord.HTTPException:
