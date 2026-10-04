@@ -194,12 +194,15 @@ class VideoPokerView(discord.ui.View):
         )
         embed.add_field(
             name=_("Cards"),
-            value="  ".join(format_card(card) for card in self.hand),
+            value="{}\n**{}**".format(
+                "  ".join(format_card(card) for card in self.hand), _(hand_name)
+            ),
             inline=False,
         )
         embed.add_field(
             name=_("Payout"),
             value=_("{}× your bet").format(payout) if payout else _("No payout"),
+            inline=False,
         )
         return embed
 
