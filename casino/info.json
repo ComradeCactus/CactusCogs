@@ -1,0 +1,19 @@
+{
+    "author" : [
+        "Redjumpman (original author; Redjumpman#1337)",
+        "ComradeCactus (maintainer of this fork)"
+    ],
+    "license": "GPL-3.0-only",
+    "upstream": "https://github.com/Redjumpman/Jumper-Plugins/tree/V3/casino",
+    "license_url": "https://github.com/Redjumpman/Jumper-Plugins/blob/V3/LICENSE",
+    "install_msg" : "Thank you for installing casino. Be sure to check out the wiki here: https://github.com/Redjumpman/Jumper-Plugins/wiki/Casino-RedV3\nThis cog may put a heavy load on your bot if used with 10k users or more.",
+    "name" : "Casino",
+    "short" : "Casino style mini games.",
+    "requirements" : ["tabulate"],
+    "description" : "Play casino games and enter daily lotto drawings.",
+    "permissions" : ["Manage Messages", "Embed Links"],
+    "tags" : ["Games", "Economy", "Fun", "Casino"],
+    "min_python_version": [3, 8, 1],
+    "min_bot_version": "3.5.0",
+    "end_user_data_statement": "This cog stores Discord IDs, lotto ticket numbers and drawing dates, and casino data as needed for operation."
+}

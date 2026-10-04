@@ -4,3 +4,4 @@ invitechecker/__pycache__/invitechecker.cpython-39.pyc
 .vscode/
 *.pyc
 __pycache__/
+.pytest_cache/
