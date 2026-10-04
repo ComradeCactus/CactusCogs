@@ -7,6 +7,9 @@ from PIL import Image
 import io, base64
 from typing import Literal, Optional
 
+REQUEST_TIMEOUT = (5, 30)  # (connect, read) seconds
+
+
 class StableDiff(commands.Cog):
     """query stable diffusion to make for art. 
     requires the scheduler/enqueue function in 
@@ -21,6 +24,18 @@ class StableDiff(commands.Cog):
 
         self.config.register_global(**default_global)
         self.bot = bot
+
+    async def _request(self, ctx, method, url, **kwargs):
+        """Send an HTTP request with a timeout; reports failures and returns None."""
+        try:
+            response = await asyncio.to_thread(
+                requests.request, method, url, timeout=REQUEST_TIMEOUT, **kwargs
+            )
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            await ctx.send("Error contacting stable diffusion: {}".format(e), ephemeral=True)
+            return None
 
     @commands.hybrid_group(name="webui", description="Manage the connection to Stable Diffusion")
     @checks.is_owner()
@@ -97,12 +112,8 @@ class StableDiff(commands.Cog):
             width = 512
             height = 512
         prompt = {'prompt': positiveprompt, 'negative_prompt': negativeprompt, 'seed': seed, 'sampler_name': sampler, 'width': width, 'height': height, 'steps': 30}
-        response = await asyncio.to_thread(requests.post, txt2img, json=prompt)
-
-        try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            await ctx.send("Error: {}".format(e), ephemeral=True)
+        response = await self._request(ctx, "POST", txt2img, json=prompt)
+        if response is None:
             return
 
         #await self.bot.send.typing(ctx.channel)
@@ -114,7 +125,9 @@ class StableDiff(commands.Cog):
         sleepcount = 0
         await asyncio.sleep(2)
         while not ready:
-            queueresult = await asyncio.to_thread(requests.get, queuequery)
+            queueresult = await self._request(ctx, "GET", queuequery)
+            if queueresult is None:
+                return
             queuecontent = json.loads(queueresult.content)
             for id in queuecontent['pending_tasks']:
                 queue.append(id['id'])
@@ -128,13 +141,15 @@ class StableDiff(commands.Cog):
                 await ctx.send("Error: Task timed out for {} - it probably finished anyway, use /generate gettask and the id.".format(taskid), ephemeral=True)
                 return
 
-        result = await asyncio.to_thread(requests.get, taskquery + taskid)
+        result = await self._request(ctx, "GET", taskquery + taskid)
+        if result is None:
+            return
         resultcontent = json.loads(result.content)
         image = resultcontent['data'][0]['image']
         headerindex = image.index(',')+1
         b64decoded = base64.b64decode(image[headerindex:])
         filename = taskid + ".png"
-        await ctx.channel.send("Generation complete for {}! (Task ID: {})".format(origmessage.author.name, taskid),
+        await ctx.channel.send("Generation complete for {}! (Task ID: {})".format(ctx.author.name, taskid),
                        file = discord.File(io.BytesIO(b64decoded), 
                        filename=filename), mention_author=True)
         await ctx.channel.send("###Generation details###\nPrompt: {}".format(resultcontent['data'][0]['infotext']))
@@ -147,7 +162,9 @@ class StableDiff(commands.Cog):
         if stablediffhost.endswith("/"):
             stablediffhost = stablediffhost[:-1]
         taskquery = stablediffhost + "/agent-scheduler/v1/results/"
-        result = await asyncio.to_thread(requests.get, taskquery + taskid)
+        result = await self._request(ctx, "GET", taskquery + taskid)
+        if result is None:
+            return
         resultcontent = json.loads(result.content)
         image = resultcontent['data'][0]['image']
         headerindex = image.index(',')+1
@@ -165,7 +182,9 @@ class StableDiff(commands.Cog):
         if stablediffhost.endswith("/"):
             stablediffhost = stablediffhost[:-1]
         configendpoint = stablediffhost + "/config"
-        result = await asyncio.to_thread(requests.get, configendpoint)
+        result = await self._request(ctx, "GET", configendpoint)
+        if result is None:
+            return
         resultcontent = json.loads(result.content)
         model = resultcontent['components'][1]['props']['value']
         await ctx.send("Current model: {}".format(model))

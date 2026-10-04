@@ -18,7 +18,6 @@ import discord
 
 
 _ = Translator("Casino", __file__)
-deck = Deck()
 
 
 class _BoundChoiceView(discord.ui.View):
@@ -227,6 +226,9 @@ class Blackjack:
     can double down.
     """
 
+    def __init__(self):
+        self.deck = Deck()
+
     @game_engine(name="Blackjack")
     async def play(self, ctx, bet):
         ph, dh, amt, msg = await self.blackjack_game(ctx, bet)
@@ -239,9 +241,9 @@ class Blackjack:
         return result
 
     async def blackjack_game(self, ctx, amount):
-        ph = deck.deal(num=2)
-        ph_count = deck.bj_count(ph)
-        dh = deck.deal(num=2)
+        ph = self.deck.deal(num=2)
+        ph_count = self.deck.bj_count(ph)
+        dh = self.deck.deal(num=2)
 
         # End game if player has 21
         if ph_count == 21:
@@ -275,7 +277,7 @@ class Blackjack:
         try:
             await bank.withdraw_credits(ctx.author, amount)
         except ValueError:
-            embed = self.bj_embed(ctx, ph, dh, deck.bj_count(ph))
+            embed = self.bj_embed(ctx, ph, dh, self.deck.bj_count(ph))
             embed.description = _(
                 "You cannot cover the additional bet. Choose hit or stay instead."
             )
@@ -294,12 +296,12 @@ class Blackjack:
                 return ph, dh, amount, message
             else:
                 ph, dh, message = await self.bj_loop(
-                    ctx, ph, dh, deck.bj_count(ph), message=message
+                    ctx, ph, dh, self.deck.bj_count(ph), message=message
                 )
                 dh = self.dealer(dh)
                 return ph, dh, amount, message
         else:
-            deck.deal(hand=ph)
+            self.deck.deal(hand=ph)
             dh = self.dealer(dh)
             amount *= 2
             return ph, dh, amount, message
@@ -309,8 +311,8 @@ class Blackjack:
         return await view.prompt(ctx, embed, message=message)
 
     async def blackjack_results(self, ctx, amount, ph, dh, message=None):
-        dc = deck.bj_count(dh)
-        pc = deck.bj_count(ph)
+        dc = self.deck.bj_count(dh)
+        pc = self.deck.bj_count(ph)
 
         if dc > 21 >= pc or dc < pc <= 21:
             outcome = _("Winner!")
@@ -333,8 +335,8 @@ class Blackjack:
 
     async def bj_loop(self, ctx, ph, dh, count, message: discord.Message):
         while count < 21:
-            ph = deck.deal(hand=ph)
-            count = deck.bj_count(hand=ph)
+            ph = self.deck.deal(hand=ph)
+            count = self.deck.bj_count(hand=ph)
 
             if count >= 21:
                 break
@@ -355,41 +357,39 @@ class Blackjack:
         # Return player hand & dealer hand when count >= 21 or the player picks stay.
         return ph, dh, message
 
-    @staticmethod
-    def dealer(dh):
-        count = deck.bj_count(dh)
+    def dealer(self, dh):
+        count = self.deck.bj_count(dh)
         # forces hit if ace in first two cards without 21
-        if deck.hand_check(dh, "Ace") and count != 21:
-            deck.deal(hand=dh)
-            count = deck.bj_count(dh)
+        if self.deck.hand_check(dh, "Ace") and count != 21:
+            self.deck.deal(hand=dh)
+            count = self.deck.bj_count(dh)
 
         # defines maximum hit score X
         while count < 17:
-            deck.deal(hand=dh)
-            count = deck.bj_count(dh)
+            self.deck.deal(hand=dh)
+            count = self.deck.bj_count(dh)
         return dh
 
-    @staticmethod
-    def bj_embed(ctx, ph, dh, count1, initial=False, outcome=None):
+    def bj_embed(self, ctx, ph, dh, count1, initial=False, outcome=None):
         hand = _("{}\n**Score:** {}")
         footer = _("Cards in Deck: {}")
         start = _("**Options:** hit, stay, or double")
         after = _("**Options:** hit or stay")
         options = "**Outcome:** " + outcome if outcome else start if initial else after
-        count2 = deck.bj_count(dh, hole=True) if not outcome else deck.bj_count(dh)
-        hole = " ".join(deck.fmt_hand([dh[0]]))
-        dealer_hand = hole if not outcome else ", ".join(deck.fmt_hand(dh))
+        count2 = self.deck.bj_count(dh, hole=True) if not outcome else self.deck.bj_count(dh)
+        hole = " ".join(self.deck.fmt_hand([dh[0]]))
+        dealer_hand = hole if not outcome else ", ".join(self.deck.fmt_hand(dh))
 
         embed = discord.Embed(colour=0xFF0000)
         embed.add_field(
             name=_("{}'s Hand").format(ctx.author.name),
-            value=hand.format(", ".join(deck.fmt_hand(ph)), count1),
+            value=hand.format(", ".join(self.deck.fmt_hand(ph)), count1),
         )
         embed.add_field(
             name=_("{}'s Hand").format(ctx.bot.user.name), value=hand.format(dealer_hand, count2)
         )
         embed.add_field(name="\u200b", value=options, inline=False)
-        embed.set_footer(text=footer.format(len(deck)))
+        embed.set_footer(text=footer.format(len(self.deck)))
         return embed
 
 
@@ -398,6 +398,7 @@ class War:
 
     def __init__(self, old_message_cache):
         self.old_message_cache = old_message_cache
+        self.deck = Deck()
 
     @game_engine("War")
     async def play(self, ctx, bet):
@@ -433,7 +434,7 @@ class War:
             "you can go to war.\nIf you go to war your bet will be doubled, "
             "but the multiplier is only applied to your original bet, the rest will "
             "be pushed."
-        ).format(deck.fmt_card(player_card))
+        ).format(self.deck.fmt_card(player_card))
         if not await self.old_message_cache.get_guild(ctx.guild):
             await message.edit(content=content)
         else:
@@ -472,7 +473,7 @@ class War:
     @staticmethod
     async def war_results(outcome, player_card, dealer_card, amount, message=None):
         msg = _("**Player Card:** {}\n**Dealer Card:** {}\n").format(
-            deck.fmt_card(player_card), deck.fmt_card(dealer_card)
+            self.deck.fmt_card(player_card), self.deck.fmt_card(dealer_card)
         )
         if outcome == "Win":
             msg += _("**Result**: Winner")
@@ -485,18 +486,17 @@ class War:
             msg += _("**Result**: Surrendered")
             return False, amount, msg, message
 
-    @staticmethod
-    def get_count(pc, dc):
-        return deck.war_count(pc), deck.war_count(dc)
+    def get_count(self, pc, dc):
+        return self.deck.war_count(pc), self.deck.war_count(dc)
 
     def war_draw(self):
-        player_card, dealer_card = deck.deal(num=2)
+        player_card, dealer_card = self.deck.deal(num=2)
         pc, dc = self.get_count(player_card, dealer_card)
         return player_card, dealer_card, pc, dc
 
     def burn_and_draw(self):
-        deck.burn(3)
-        player_card, dealer_card = deck.deal(num=2)
+        self.deck.burn(3)
+        player_card, dealer_card = self.deck.deal(num=2)
         pc, dc = self.get_count(player_card, dealer_card)
         return player_card, dealer_card, pc, dc
 

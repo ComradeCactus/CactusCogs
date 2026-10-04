@@ -115,6 +115,38 @@ def test_completed_drawing_deletes_only_its_tickets(tmp_path):
     asyncio.run(run_test())
 
 
+def test_drawing_and_ticket_settlements_survive_scheduler_retries(tmp_path):
+    async def run_test():
+        path = tmp_path / "lotto.json"
+        store = LottoStore(path)
+        draw_date, tickets = await store.add_tickets(
+            7,
+            time(20, 0),
+            42,
+            [[1, 2, 3, 4, 5, 6]],
+            now=datetime(2026, 10, 4, 19, 0, tzinfo=timezone.utc),
+        )
+        drawing = await store.begin_drawing(7, draw_date, [1, 2, 3, 4, 5, 6])
+        await store.settle_ticket(
+            7, draw_date, tickets[0]["ticket_id"], paid=1000, pending=0
+        )
+
+        reloaded = LottoStore(path)
+        assert await reloaded.expire_before(7, "2026-10-05") == []
+        assert await reloaded.drawing_dates(7) == [draw_date]
+        retried = await reloaded.begin_drawing(7, draw_date, [6, 5, 4, 3, 2, 1])
+        settlement = await reloaded.settle_ticket(
+            7, draw_date, tickets[0]["ticket_id"], paid=2000, pending=0
+        )
+
+        assert retried["numbers"] == drawing["numbers"]
+        assert settlement == {"paid": 1000, "pending": 0}
+        assert retried["settlements"][tickets[0]["ticket_id"]] == settlement
+        assert await reloaded.tickets(7, draw_date) == tickets
+
+    asyncio.run(run_test())
+
+
 def test_tickets_added_after_a_drawing_are_for_the_following_day(tmp_path):
     async def run_test():
         store = LottoStore(tmp_path / "lotto.json")

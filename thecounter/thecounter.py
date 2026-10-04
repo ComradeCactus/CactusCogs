@@ -25,6 +25,12 @@ class TheCounter(commands.Cog):
             bucket = self._cd.get_bucket(message)
             return bucket.update_rate_limit()
 
+    async def red_delete_data_for_user(
+        self, *, requester: Literal["discord_deleted_user", "owner", "user", "user_strict"], user_id: int
+    ):
+        if await self.config.last_offender() == user_id:
+            await self.config.last_offender.set('')
+
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.guild is None or message.author == self.bot.user:
@@ -40,7 +46,7 @@ class TheCounter(commands.Cog):
             minutes = (delta.seconds//60)%60
             if author == None:
                 author = message.author.global_name
-            if minutes == 0:
+            if 0 <= delta.total_seconds() < 60:
                 await message.reply("you couldn't even wait a minute, could you?", mention_author=True)
                 await message.author.timeout(timedelta(seconds=60), reason=f"Couldn't wait a minute to say that word. You know the one.")
                 await self.config.last_offender.set(message.author.id)

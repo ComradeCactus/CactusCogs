@@ -496,6 +496,12 @@ class Casino(Database, commands.Cog):
                 guild.id: await self.lotto_store.tickets(guild.id)
                 for guild in self.bot.guilds
             }
+            drawing_tasks = list(self.lotto_draw_tasks.values())
+            for task in drawing_tasks:
+                task.cancel()
+            if drawing_tasks:
+                await asyncio.gather(*drawing_tasks, return_exceptions=True)
+            self.lotto_draw_tasks.clear()
             await self.lotto_store.clear()
             for guild in self.bot.guilds:
                 role_id = await self.config.guild(guild).lotto_role()
@@ -930,19 +936,30 @@ class Casino(Database, commands.Cog):
         channel_id = await guild_config.lotto_channel()
         if not channel_id or not role_id:
             return
-        scheduled = draw_at_date(now.date(), draw_time)
-        if now < scheduled:
-            return
-        last_drawn = await self.lotto_store.last_drawn(guild.id)
-        if last_drawn is not None and last_drawn >= draw_date:
-            return
-
         channel = guild.get_channel(channel_id)
         if channel is None or role is None:
             return
         task = self.lotto_draw_tasks.get(guild.id)
         if task is not None and not task.done():
             return
+
+        pending_draw_dates = await self.lotto_store.drawing_dates(guild.id)
+        for pending_date in pending_draw_dates:
+            if pending_date <= draw_date:
+                self._start_lotto_drawing(
+                    guild, channel, role, pending_date, draw_time
+                )
+                return
+
+        scheduled = draw_at_date(now.date(), draw_time)
+        if now < scheduled:
+            return
+        last_drawn = await self.lotto_store.last_drawn(guild.id)
+        if last_drawn is not None and last_drawn >= draw_date:
+            return
+        self._start_lotto_drawing(guild, channel, role, draw_date, draw_time)
+
+    def _start_lotto_drawing(self, guild, channel, role, draw_date, draw_time):
         task = asyncio.create_task(
             self._run_lotto_drawing(guild, channel, role, draw_date, draw_time)
         )
@@ -967,8 +984,11 @@ class Casino(Database, commands.Cog):
             )
 
     async def _run_lotto_drawing(self, guild, channel, role, draw_date, draw_time):
+        drawing = await self.lotto_store.begin_drawing(
+            guild.id, draw_date, draw_numbers()
+        )
         tickets = await self.lotto_store.tickets(guild.id, draw_date)
-        drawn_numbers = draw_numbers()
+        drawn_numbers = drawing["numbers"]
         await channel.send(
             "{} The drawing will start soon!".format(role.mention),
             allowed_mentions=discord.AllowedMentions(
@@ -1002,9 +1022,19 @@ class Casino(Database, commands.Cog):
         )
         for tier, winning_tickets, jackpot in tiers:
             for ticket, amount in split_jackpot(jackpot, winning_tickets):
-                paid, pending = await self._deposit_lotto_winnings(
-                    guild, ticket["user_id"], amount
-                )
+                ticket_id = ticket["ticket_id"]
+                settlement = drawing["settlements"].get(ticket_id)
+                if settlement is None:
+                    paid, pending = await self._deposit_lotto_winnings(
+                        guild, ticket["user_id"], amount
+                    )
+                    settlement = await self.lotto_store.settle_ticket(
+                        guild.id, draw_date, ticket_id, paid, pending
+                    )
+                    drawing["settlements"][ticket_id] = settlement
+                else:
+                    paid = settlement["paid"]
+                    pending = settlement["pending"]
                 award = awards.setdefault(
                     ticket["user_id"],
                     {"exact_paid": 0, "exact_pending": 0, "unordered_paid": 0, "unordered_pending": 0},

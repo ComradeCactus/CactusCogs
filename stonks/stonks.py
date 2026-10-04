@@ -55,11 +55,31 @@ class Stonks(commands.Cog):
             'X-RapidAPI-Host': await self.config.rapidapihost()
         }
 
-        response = await asyncio.to_thread(requests.request, "GET", url, headers=headers, params=querystring)
+        try:
+            response = await asyncio.to_thread(
+                requests.request, "GET", url, headers=headers, params=querystring, timeout=(5, 15)
+            )
+            response.raise_for_status()
+            quote = response.json()
+        except requests.exceptions.RequestException as e:
+            await ctx.send("Error fetching quote: {}".format(e), ephemeral=True)
+            return
+        except ValueError:
+            await ctx.send("The quote service returned an invalid response.", ephemeral=True)
+            return
 
-        print(response.json())
-        quote = json.loads(response.content)
+        if not isinstance(quote, list) or not quote or not isinstance(quote[0], dict):
+            await ctx.send("No quote found for `{}`.".format(ticker), ephemeral=True)
+            return
 
-        await ctx.send(quote[0]["shortName"] + " asking price: " + str(quote[0]["regularMarketPrice"]) + " " + str(quote[0]["currency"]))
+        data = quote[0]
+        try:
+            message = "{} asking price: {} {}".format(
+                data["shortName"], data["regularMarketPrice"], data["currency"]
+            )
+        except KeyError:
+            await ctx.send("The quote for `{}` was missing expected fields.".format(ticker), ephemeral=True)
+            return
+        await ctx.send(message)
 
     

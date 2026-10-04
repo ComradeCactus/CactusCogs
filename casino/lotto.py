@@ -4,6 +4,7 @@ import os
 import random
 import re
 import tempfile
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -103,7 +104,8 @@ class LottoStore:
     @staticmethod
     def _guild_data(data, guild_id):
         return data.setdefault("guilds", {}).setdefault(
-            str(guild_id), {"tickets": [], "last_drawn": None}
+            str(guild_id),
+            {"tickets": [], "last_drawn": None, "drawings": {}},
         )
 
     async def add_tickets(self, guild_id, draw_time, user_id, numbers_list, now=None):
@@ -115,6 +117,7 @@ class LottoStore:
             ).date().isoformat()
             entries = [
                 {
+                    "ticket_id": uuid.uuid4().hex,
                     "draw_date": draw_date,
                     "user_id": int(user_id),
                     "numbers": list(numbers),
@@ -124,6 +127,56 @@ class LottoStore:
             guild_data["tickets"].extend(entries)
             await self._run_io(self._write, data)
             return draw_date, entries
+
+    async def begin_drawing(self, guild_id, draw_date, drawn_numbers):
+        async with self._lock:
+            data = await self._run_io(self._read)
+            guild_data = self._guild_data(data, guild_id)
+            drawings = guild_data.setdefault("drawings", {})
+            drawing = drawings.get(draw_date)
+            changed = False
+            if drawing is None:
+                drawing = {
+                    "numbers": list(drawn_numbers),
+                    "settlements": {},
+                }
+                drawings[draw_date] = drawing
+                changed = True
+
+            for ticket in guild_data.get("tickets", []):
+                if ticket["draw_date"] == draw_date and "ticket_id" not in ticket:
+                    ticket["ticket_id"] = uuid.uuid4().hex
+                    changed = True
+            if changed:
+                await self._run_io(self._write, data)
+            return {
+                "numbers": list(drawing["numbers"]),
+                "settlements": {
+                    ticket_id: dict(settlement)
+                    for ticket_id, settlement in drawing["settlements"].items()
+                },
+            }
+
+    async def settle_ticket(self, guild_id, draw_date, ticket_id, paid, pending):
+        async with self._lock:
+            data = await self._run_io(self._read)
+            guild_data = self._guild_data(data, guild_id)
+            drawing = guild_data.setdefault("drawings", {}).get(draw_date)
+            if drawing is None:
+                raise ValueError("No active lotto drawing exists for that date.")
+            settlements = drawing.setdefault("settlements", {})
+            settlement = settlements.get(ticket_id)
+            if settlement is None:
+                settlement = {"paid": int(paid), "pending": int(pending)}
+                settlements[ticket_id] = settlement
+                await self._run_io(self._write, data)
+            return dict(settlement)
+
+    async def drawing_dates(self, guild_id):
+        async with self._lock:
+            data = await self._run_io(self._read)
+            guild_data = self._guild_data(data, guild_id)
+            return sorted(guild_data.get("drawings", {}))
 
     async def tickets(self, guild_id, draw_date=None):
         async with self._lock:
@@ -157,16 +210,19 @@ class LottoStore:
         async with self._lock:
             data = await self._run_io(self._read)
             guild_data = self._guild_data(data, guild_id)
+            in_progress = set(guild_data.setdefault("drawings", {}))
             expired = [
                 ticket
                 for ticket in guild_data.get("tickets", [])
                 if ticket["draw_date"] < draw_date
+                and ticket["draw_date"] not in in_progress
             ]
             if expired:
                 guild_data["tickets"] = [
                     ticket
                     for ticket in guild_data["tickets"]
                     if ticket["draw_date"] >= draw_date
+                    or ticket["draw_date"] in in_progress
                 ]
                 await self._run_io(self._write, data)
             return [dict(ticket) for ticket in expired]
@@ -186,6 +242,7 @@ class LottoStore:
                 if ticket["draw_date"] != draw_date
             ]
             guild_data["last_drawn"] = draw_date
+            guild_data.setdefault("drawings", {}).pop(draw_date, None)
             await self._run_io(self._write, data)
             return [dict(ticket) for ticket in expired]
 
@@ -193,6 +250,7 @@ class LottoStore:
         async with self._lock:
             data = await self._run_io(self._read)
             removed = {}
+            removed_ticket_ids = set()
             for guild_id, guild_data in data["guilds"].items():
                 tickets = guild_data.get("tickets", [])
                 user_tickets = [
@@ -200,12 +258,22 @@ class LottoStore:
                 ]
                 if user_tickets:
                     removed[guild_id] = [dict(ticket) for ticket in user_tickets]
+                    removed_ticket_ids.update(
+                        ticket["ticket_id"]
+                        for ticket in user_tickets
+                        if "ticket_id" in ticket
+                    )
                     guild_data["tickets"] = [
                         ticket
                         for ticket in tickets
                         if ticket["user_id"] != int(user_id)
                     ]
             if removed:
+                for guild_data in data["guilds"].values():
+                    for drawing in guild_data.get("drawings", {}).values():
+                        settlements = drawing.get("settlements", {})
+                        for ticket_id in removed_ticket_ids:
+                            settlements.pop(ticket_id, None)
                 await self._run_io(self._write, data)
             return removed
 

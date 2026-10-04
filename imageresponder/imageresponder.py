@@ -208,15 +208,15 @@ class ImageResponder(commands.Cog):
             return
         if message.author.id != self.bot.user.id:
             if message.content in await self.config.guild(guild).listencmd():
-                await channel.typing()
                 images = await self.config.guild(guild).images()
                 if not images:
                     return
                 imagefilename = random.choice(images)
                 file = discord.File(str(cog_data_path(self)) + f"/{guild.id}/{imagefilename}")
                 try:
-                    await channel.send(
-                        file=file
-                    )
+                    async with channel.typing():
+                        await channel.send(
+                            file=file
+                        )
                 except Exception as e:
                     print(e)
