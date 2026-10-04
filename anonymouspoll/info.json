@@ -1,0 +1,11 @@
+{
+    "author": ["ComradeCactus"],
+    "name": "anonymouspoll",
+    "short": "Post anonymous button polls with a command.",
+    "description": "Start a button-based poll in the current channel. Voters are hidden; only totals are shown. Polls persist across restarts and post results when they end.",
+    "install_msg": "Use `/anonymouspoll` (pop-up form) or `/anonymouspoll-text` to start a poll without showing who started it. Admins can use `/anonymouspoll-log` to log poll starters to a channel. Requires discord.py 2.7+ (Red 3.5.24+). Votes are only shown as totals.",
+    "requirements": [],
+    "tags": ["poll", "utility"],
+    "min_python_version": [3, 8, 0],
+    "end_user_data_statement": "This cog stores the user IDs of voters, and which choices they picked, for the duration of each open poll. It is deleted when the poll ends."
+}

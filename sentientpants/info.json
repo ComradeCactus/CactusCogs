@@ -1,0 +1,20 @@
+{
+	"author": [
+		"ComradeCactus"
+	],
+	"description": "Work in progress. Currently based on the stable diffusion cog; the end goal is for the bot to randomly reply to messages using a self-hosted LLM.",
+	"install_msg": "This cog is still in heavy development and may not work yet.",
+	"short": "Randomly reply to messages using a self-hosted LLM (WIP)",
+	"tags": [
+		"llm",
+		"ai",
+		"chat",
+		"wip"
+	],
+	"requirements": [
+		"requests",
+		"Pillow"
+	],
+	"end_user_data_statement": "This cog does not currently persistently store end user data.",
+	"type": "COG"
+}

@@ -1,0 +1,19 @@
+{
+	"author": [
+		"ComradeCactus"
+	],
+	"description": "Work in progress. A stock market simulator that uses tots and real stock prices fetched from RapidAPI. Currently only supports fetching quotes.",
+	"install_msg": "This cog is unfinished. Use `[p]stonksetup setrapidapi` to set your RapidAPI host and key, then `[p]stonks quote <ticker>` to get a quote.",
+	"short": "Stock market simulator using tots and real prices (WIP)",
+	"tags": [
+		"stocks",
+		"economy",
+		"game",
+		"wip"
+	],
+	"requirements": [
+		"requests"
+	],
+	"end_user_data_statement": "This cog does not currently persistently store end user data.",
+	"type": "COG"
+}

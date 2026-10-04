@@ -1,0 +1,20 @@
+{
+	"author": [
+		"ComradeCactus"
+	],
+	"description": "Generate images with a self-hosted Stable Diffusion (AUTOMATIC1111) web UI via its API. Supports SDXL mode, retrieving previous tasks, and showing the current model.",
+	"install_msg": "Use `[p]webui setwebui <host>` to point the cog at your Stable Diffusion web UI, then `[p]generate fromprompt` to create images.",
+	"short": "Generate art with a self-hosted Stable Diffusion web UI",
+	"tags": [
+		"stablediffusion",
+		"ai",
+		"image",
+		"art"
+	],
+	"requirements": [
+		"requests",
+		"Pillow"
+	],
+	"end_user_data_statement": "This cog stores only the configured web UI host and SDXL setting. Prompts are sent to the configured Stable Diffusion host to generate images; no end user data is persistently stored.",
+	"type": "COG"
+}

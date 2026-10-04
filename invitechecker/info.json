@@ -3,7 +3,7 @@
         "ComradeCactus"
 	],
 	"description": "Log which invite was used for a user join event.",
-    "install_msg": "Start by setting a channel, then sync invites.\n`[p]invitelog setchannel`\n`[p]invitelog syncinvites`",
+    "install_msg": "Start by setting a channel, then sync invites.\n`[p]invitelog setchannel`\n`[p]invitelog syncinvites`\nif you don't it won't work",
 	"short": "Get a litte message whenever someone joins as to what they used.",
 	"tags": [
 		"data",
