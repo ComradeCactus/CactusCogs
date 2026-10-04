@@ -186,7 +186,7 @@ class ImageResponder(commands.Cog):
         else:
             await ctx.send("Trigger not found")
             
-    @imageresponder.command(alias=["view"])
+    @imageresponder.command(aliases=["view"])
     @checks.mod_or_permissions(administrator=True)
     async def viewimage(self, ctx: Context, imagename: str):
         """View an image that is currently available"""
@@ -209,7 +209,10 @@ class ImageResponder(commands.Cog):
         if message.author.id != self.bot.user.id:
             if message.content in await self.config.guild(guild).listencmd():
                 await channel.typing()
-                imagefilename = random.choice(await self.config.guild(guild).images())
+                images = await self.config.guild(guild).images()
+                if not images:
+                    return
+                imagefilename = random.choice(images)
                 file = discord.File(str(cog_data_path(self)) + f"/{guild.id}/{imagefilename}")
                 try:
                     await channel.send(

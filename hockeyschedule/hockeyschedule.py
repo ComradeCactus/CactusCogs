@@ -1,3 +1,4 @@
+import asyncio
 import discord
 import requests
 import datetime
@@ -33,7 +34,7 @@ class HockeySchedule(commands.Cog):
         teamuri = baseuri + team + "/week/now"
         
         try:
-            response = requests.get(teamuri)
+            response = await asyncio.to_thread(requests.get, teamuri, timeout=10)
             data = response.json()
             games = data.get("games", [])
             club_utc_offset = data.get("clubUTCOffset", "-06:00")
@@ -50,7 +51,7 @@ class HockeySchedule(commands.Cog):
             if not next_game:
                 next_week_start = now + datetime.timedelta(days=(7 - now.weekday()))
                 next_week_uri = baseuri + team + "/week/" + next_week_start.strftime("%Y-%m-%d")
-                response = requests.get(next_week_uri)
+                response = await asyncio.to_thread(requests.get, next_week_uri, timeout=10)
                 data = response.json()
                 games = data.get("games", [])
                 for game in games:
@@ -74,32 +75,29 @@ class HockeySchedule(commands.Cog):
         
     async def update_channel_description(self, ctx, guild: discord.Guild, channel_id: int, next_game: int, away_team: str, home_team: str):
         """Update the channel description with the next game."""
+        async def respond(message: str):
+            # Scheduled runs have no context to reply to
+            if ctx is None:
+                return
+            if isinstance(ctx, discord.Interaction):
+                await ctx.response.send_message(message, ephemeral=True)
+            else:
+                await ctx.send(message)
+
         channel = guild.get_channel(channel_id)
         if not channel:
-            if isinstance(ctx, discord.Interaction):
-                await ctx.response.send_message("Channel not found.", ephemeral=True)
-            else:
-                await ctx.send("Channel not found.")
+            await respond("Channel not found.")
             return
 
         try:
             if channel.permissions_for(guild.me).manage_channels:
                 description = f"Next game: {away_team}@{home_team} <t:{next_game}:R> (<t:{next_game}:f>)"
                 await channel.edit(topic=description)
-                if isinstance(ctx, discord.Interaction):
-                    await ctx.response.send_message("Channel description updated.", ephemeral=True)
-                else:
-                    await ctx.send("Channel description updated.")
+                await respond("Channel description updated.")
             else:
-                if isinstance(ctx, discord.Interaction):
-                    await ctx.response.send_message("I don't have permission to manage the channel.", ephemeral=True)
-                else:
-                    await ctx.send("I don't have permission to manage the channel.")
+                await respond("I don't have permission to manage the channel.")
         except discord.DiscordException as e:
-            if isinstance(ctx, discord.Interaction):
-                await ctx.response.send_message(f"Error updating channel description: {e}", ephemeral=True)
-            else:
-                await ctx.send(f"Error updating channel description: {e}")
+            await respond(f"Error updating channel description: {e}")
         
     @commands.hybrid_group(name="hockeyschedule", description="Manage the hockey schedule description changer.", invoke_without_command=True)
     @checks.mod_or_permissions(manage_channels=True)
@@ -182,7 +180,15 @@ class HockeySchedule(commands.Cog):
                 await ctx.send("Team not set. Use `[p]hockeyschedule setteam MIN` to set the team.")
             return
         try:
-            nextgame, away_team, home_team = await self.get_next_game(team)
+            result = await self.get_next_game(team)
+            if result is None:
+                msg = "Could not find an upcoming game. Try again later."
+                if isinstance(ctx, discord.Interaction):
+                    await ctx.response.send_message(msg, ephemeral=True)
+                else:
+                    await ctx.send(msg)
+                return
+            nextgame, away_team, home_team = result
             if isinstance(ctx, discord.Interaction):
                 await ctx.response.send_message("Updating channel description with next game: " + str(nextgame), ephemeral=True)
             else:
@@ -222,7 +228,11 @@ class HockeySchedule(commands.Cog):
             if channel == "" or team == "":
                 continue
             try:
-                nextgame, away_team, home_team = await self.get_next_game(team)
+                result = await self.get_next_game(team)
+                if result is None:
+                    print(f"No upcoming game found for guild: {guild.name}")
+                    continue
+                nextgame, away_team, home_team = result
                 await self.update_channel_description(None, guild, channel, nextgame, away_team, home_team)
             except discord.DiscordException as e:
                 print(f"Error updating channel description: {e}")

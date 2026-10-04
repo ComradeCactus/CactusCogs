@@ -27,7 +27,7 @@ class TheCounter(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        if message.author == self.bot.user:
+        if message.guild is None or message.author == self.bot.user:
             return
         msg = message.content.lower()
         banned_words = await self.config.banned_words()

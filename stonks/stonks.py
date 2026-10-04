@@ -12,7 +12,7 @@ class Stonks(commands.Cog):
     using redbot credits."""
 
     def __init__(self, bot):
-        self.config = Config.get_conf(self, identifier=98237409834)
+        self.config = Config.get_conf(self, identifier=7149203856471)
         default_global = {
             "rapidapikey" : "NOTSET",
             "rapidapihost" : "NOTSET"            
@@ -55,7 +55,7 @@ class Stonks(commands.Cog):
             'X-RapidAPI-Host': await self.config.rapidapihost()
         }
 
-        response = requests.request("GET", url, headers=headers, params=querystring)
+        response = await asyncio.to_thread(requests.request, "GET", url, headers=headers, params=querystring)
 
         print(response.json())
         quote = json.loads(response.content)

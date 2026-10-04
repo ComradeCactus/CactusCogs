@@ -97,7 +97,7 @@ class StableDiff(commands.Cog):
             width = 512
             height = 512
         prompt = {'prompt': positiveprompt, 'negative_prompt': negativeprompt, 'seed': seed, 'sampler_name': sampler, 'width': width, 'height': height, 'steps': 30}
-        response = requests.post(txt2img, json=prompt)
+        response = await asyncio.to_thread(requests.post, txt2img, json=prompt)
 
         try:
             response.raise_for_status()
@@ -114,7 +114,7 @@ class StableDiff(commands.Cog):
         sleepcount = 0
         await asyncio.sleep(2)
         while not ready:
-            queueresult = requests.get(queuequery)
+            queueresult = await asyncio.to_thread(requests.get, queuequery)
             queuecontent = json.loads(queueresult.content)
             for id in queuecontent['pending_tasks']:
                 queue.append(id['id'])
@@ -128,7 +128,7 @@ class StableDiff(commands.Cog):
                 await ctx.send("Error: Task timed out for {} - it probably finished anyway, use /generate gettask and the id.".format(taskid), ephemeral=True)
                 return
 
-        result = requests.get((taskquery + taskid))
+        result = await asyncio.to_thread(requests.get, taskquery + taskid)
         resultcontent = json.loads(result.content)
         image = resultcontent['data'][0]['image']
         headerindex = image.index(',')+1
@@ -147,7 +147,7 @@ class StableDiff(commands.Cog):
         if stablediffhost.endswith("/"):
             stablediffhost = stablediffhost[:-1]
         taskquery = stablediffhost + "/agent-scheduler/v1/results/"
-        result = requests.get((taskquery + taskid))
+        result = await asyncio.to_thread(requests.get, taskquery + taskid)
         resultcontent = json.loads(result.content)
         image = resultcontent['data'][0]['image']
         headerindex = image.index(',')+1
@@ -165,7 +165,7 @@ class StableDiff(commands.Cog):
         if stablediffhost.endswith("/"):
             stablediffhost = stablediffhost[:-1]
         configendpoint = stablediffhost + "/config"
-        result = requests.get(configendpoint)
+        result = await asyncio.to_thread(requests.get, configendpoint)
         resultcontent = json.loads(result.content)
         model = resultcontent['components'][1]['props']['value']
         await ctx.send("Current model: {}".format(model))

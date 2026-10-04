@@ -368,8 +368,34 @@ class AnonymousPoll(commands.Cog):
         ready = int(time.time() + remaining)
         return f"You can start another poll <t:{ready}:R>. Polls are limited to one per hour."
 
-    async def red_delete_data_for_user(self, **kwargs):
-        return
+    async def red_delete_data_for_user(self, *, requester, user_id):
+        self._last_poll.pop(user_id, None)
+        for key in [k for k in self._notices if k[1] == user_id]:
+            notice, task = self._notices.pop(key)
+            task.cancel()
+            try:
+                await notice.delete()
+            except discord.HTTPException:
+                pass
+
+        changed = []
+        async with self._lock:
+            polls = await self.config.polls()
+            for message_id, poll in polls.items():
+                if poll["votes"].pop(str(user_id), None) is not None:
+                    changed.append((message_id, poll))
+            if changed:
+                await self.config.polls.set(polls)
+
+        # Refresh the public embeds so the removed vote no longer counts.
+        for message_id, poll in changed:
+            channel = self.bot.get_channel(poll["channel"])
+            if channel is None:
+                continue
+            try:
+                await channel.get_partial_message(int(message_id)).edit(embed=poll_embed(poll))
+            except discord.HTTPException:
+                pass
 
     @app_commands.command(name="anonymouspoll-text", description="Start a poll without showing your name, using command options.")
     @app_commands.describe(

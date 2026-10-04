@@ -15,7 +15,7 @@ class SentientPants(commands.Cog):
     stable-diffusion-webui"""
 
     def __init__(self, bot):
-        self.config = Config.get_conf(self, identifier=98237409834)
+        self.config = Config.get_conf(self, identifier=5827364019283)
         default_global = {
             "stablediffhost" : "NOTSET",
             "sdxl" : False,

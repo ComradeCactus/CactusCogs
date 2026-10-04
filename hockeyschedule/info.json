@@ -2,9 +2,9 @@
 	"author": [
         "ComradeCactus"
 	],
-	"description": "respond with a random image from a list, when a command is issued",
-    "install_msg": "use `[p]imageresponder initialize` in your server to set up the cog",
-	"short": "spam images I suppose",
+	"description": "Update a channel topic with the next game for a selected NHL team.",
+    "install_msg": "use `[p]hockeyschedule initialize` in your server to set up the cog",
+	"short": "Update channel topic with next NHL game",
 	"tags": [
 		"welcome",
         "responder",

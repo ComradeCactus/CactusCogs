@@ -1,0 +1,16 @@
+{
+	"author": [
+		"ComradeCactus"
+	],
+	"description": "Tracks the time since a banned word was last said. When someone says it, the counter resets and they get called out, and a repeat offender within a minute gets a 60 second timeout. Mostly just for fun.",
+	"install_msg": "The cog works as soon as it is loaded. The bot needs the Moderate Members permission to time out users.",
+	"short": "Bonk users for saying a banned word",
+	"tags": [
+		"fun",
+		"counter",
+		"timeout"
+	],
+	"requirements": [],
+	"end_user_data_statement": "This cog stores the user ID of the last person to say the banned word, along with the time it was said.",
+	"type": "COG"
+}
