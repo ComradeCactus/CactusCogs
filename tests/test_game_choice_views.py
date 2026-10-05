@@ -178,9 +178,12 @@ def test_scheming_eunuch_user_commands_are_hybrid_subcommands():
 
     from casino.casino import Casino
 
-    users = Casino.casino_users
-    assert isinstance(users, commands.HybridGroup)
-    assert {command.name for command in users.commands} == {"add", "remove", "list"}
+    eunuchs = Casino.casino_eunuchs
+    assert isinstance(eunuchs, commands.HybridGroup)
+    assert {command.name for command in eunuchs.commands} == {"add", "remove", "list"}
     assert {
-        command.name for command in users.app_command.commands
+        command.name for command in eunuchs.app_command.commands
     } == {"add", "remove", "list"}
+    assert "eunuchs" in {
+        command.name for command in Casino.casino.app_command.commands
+    }

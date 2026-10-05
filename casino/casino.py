@@ -33,7 +33,7 @@ from redbot.core.i18n import Translator
 from redbot.core import bank, commands, checks, data_manager
 from redbot.core.errors import BalanceTooHigh
 from redbot.core.utils import AsyncIter
-from redbot.core.utils.chat_formatting import box, humanize_number
+from redbot.core.utils.chat_formatting import box, humanize_number, pagify
 from redbot.core.utils.predicates import MessagePredicate
 
 # Discord
@@ -367,54 +367,68 @@ class Casino(Database, commands.Cog):
         pass
 
     @casino.group(
-        name="users",
-        description="Manage your designated scheming eunuchs.",
+        name="eunuchs",
+        description="Manage your scheming eunuchs.",
         invoke_without_command=True,
     )
-    async def casino_users(self, ctx: commands.Context):
-        """Manage the users who can vote on your in-game choices."""
-        await ctx.send_help()
+    async def casino_eunuchs(self, ctx: commands.Context):
+        """Manage users who can vote on your in-game choices."""
+        await ctx.send(
+            _("Use the eunuchs add, remove, or list subcommands."),
+            ephemeral=True,
+        )
 
-    @casino_users.command(
+    @casino_eunuchs.command(
         name="add",
         description="Designate a user as one of your scheming eunuchs.",
     )
     @discord.app_commands.describe(
-        user="The user to allow to vote on your Blackjack and Double choices."
+        user="The user to allow to vote on your game choices."
     )
     async def add_eunuch(self, ctx: commands.Context, user: discord.User):
         if user.id == ctx.author.id:
-            return await ctx.send(_("You cannot designate yourself as a scheming eunuch."))
+            return await ctx.send(
+                _("You cannot designate yourself as a scheming eunuch."),
+                ephemeral=True,
+            )
 
         player_data = await super().get_data(ctx, player=ctx.author)
         eunuchs = await player_data.Scheming_Eunuchs()
         if user.id in eunuchs:
-            return await ctx.send(_("{} is already one of your scheming eunuchs.").format(user))
-        if len(eunuchs) >= 2:
-            return await ctx.send(_("You can designate no more than two scheming eunuchs."))
+            return await ctx.send(
+                _("{} is already one of your scheming eunuchs.").format(user),
+                ephemeral=True,
+            )
 
         eunuchs.append(user.id)
         await player_data.Scheming_Eunuchs.set(eunuchs)
-        await ctx.send(_("{} has been designated as one of your scheming eunuchs.").format(user))
+        await ctx.send(
+            _("{} has been designated as one of your scheming eunuchs.").format(user),
+            ephemeral=True,
+        )
 
-    @casino_users.command(
+    @casino_eunuchs.command(
         name="remove",
         description="Remove a user's scheming eunuch designation.",
     )
-    @discord.app_commands.describe(
-        user="The scheming eunuch to remove."
-    )
+    @discord.app_commands.describe(user="The scheming eunuch to remove.")
     async def remove_eunuch(self, ctx: commands.Context, user: discord.User):
         player_data = await super().get_data(ctx, player=ctx.author)
         eunuchs = await player_data.Scheming_Eunuchs()
         if user.id not in eunuchs:
-            return await ctx.send(_("{} is not one of your scheming eunuchs.").format(user))
+            return await ctx.send(
+                _("{} is not one of your scheming eunuchs.").format(user),
+                ephemeral=True,
+            )
 
         eunuchs.remove(user.id)
         await player_data.Scheming_Eunuchs.set(eunuchs)
-        await ctx.send(_("{} is no longer one of your scheming eunuchs.").format(user))
+        await ctx.send(
+            _("{} is no longer one of your scheming eunuchs.").format(user),
+            ephemeral=True,
+        )
 
-    @casino_users.command(
+    @casino_eunuchs.command(
         name="list",
         description="List your scheming eunuchs.",
     )
@@ -422,12 +436,16 @@ class Casino(Database, commands.Cog):
         player_data = await super().get_data(ctx, player=ctx.author)
         eunuchs = await player_data.Scheming_Eunuchs()
         if not eunuchs:
-            return await ctx.send(_("You have not designated any scheming eunuchs."))
-        await ctx.send(
-            _("Your scheming eunuchs: {}").format(
-                ", ".join("<@{}>".format(user_id) for user_id in eunuchs)
+            return await ctx.send(
+                _("You have not designated any scheming eunuchs."),
+                ephemeral=True,
             )
-        )
+        for page in pagify(
+            _("Your scheming eunuchs:\n{}").format(
+                "\n".join("<@{}>".format(user_id) for user_id in eunuchs)
+            )
+        ):
+            await ctx.send(page, ephemeral=True)
 
     @casino.command(description="View the available casino memberships.")
     async def memberships(self, ctx):
