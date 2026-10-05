@@ -1,10 +1,12 @@
 from collections import Counter
+import asyncio
 
 import discord
 from redbot.core.i18n import Translator
 from redbot.core.utils.chat_formatting import humanize_number
 
 from .deck import Deck
+from .games import _EunuchAdvice
 
 _ = Translator("Casino", __file__)
 
@@ -68,9 +70,10 @@ def format_card(card):
 
 
 class VideoPokerView(discord.ui.View):
-    def __init__(self, owner_id, hand, bet, max_bet, deck):
+    def __init__(self, owner_id, hand, bet, max_bet, deck, eunuch_ids=()):
         super().__init__(timeout=180)
         self.owner_id = owner_id
+        self.eunuch_ids = set(eunuch_ids)
         self.hand = list(hand)
         self.bet = bet
         self.max_bet = max_bet
@@ -80,6 +83,10 @@ class VideoPokerView(discord.ui.View):
         self.message = None
         self.finished = False
         self.card_buttons = []
+        self.eunuch_holds = {}
+        self.eunuch_draw_votes = set()
+        self.vote_lock = asyncio.Lock()
+        self.advice = _EunuchAdvice()
 
         for index, card in enumerate(self.hand):
             button = discord.ui.Button(
@@ -100,50 +107,108 @@ class VideoPokerView(discord.ui.View):
         self.add_item(self.draw_button)
 
     async def interaction_check(self, interaction):
-        if interaction.user.id != self.owner_id:
+        if (
+            interaction.user.id != self.owner_id
+            and interaction.user.id not in self.eunuch_ids
+        ):
             await interaction.response.send_message(
-                _("Only the player who started this hand can use these buttons."),
+                _("Only the player can interact with this game."),
                 ephemeral=True,
+                delete_after=60,
             )
             return False
         return True
 
+    def _advice_text(self):
+        votes = []
+        for user_id, held_cards in self.eunuch_holds.items():
+            votes.extend(
+                _("Hold {} (<@{}>)").format(format_card(self.hand[index]), user_id)
+                for index in sorted(held_cards)
+            )
+        votes.extend(
+            _("Draw (<@{}>)").format(user_id)
+            for user_id in self.eunuch_draw_votes
+        )
+        advice = ", ".join(votes) if votes else _("No votes yet.")
+        return _("Your eunuchs have offered you the following advice... {}").format(advice)
+
+    async def start_player_advice(self, interaction):
+        if self.eunuch_ids:
+            await self.advice.start(interaction, self._advice_text())
+
+    async def _update_player_advice(self):
+        await self.advice.update(self._advice_text())
+
     def _hold_callback(self, index):
         async def callback(interaction):
-            if self.finished:
-                await interaction.response.send_message(
-                    _("This hand has already finished."), ephemeral=True
+            async with self.vote_lock:
+                if self.finished:
+                    await interaction.response.send_message(
+                        _("This hand has already finished."),
+                        ephemeral=True,
+                        delete_after=60,
+                    )
+                    return
+                user_id = interaction.user.id
+                if user_id in self.eunuch_ids:
+                    held_cards = self.eunuch_holds.setdefault(user_id, set())
+                    card = format_card(self.hand[index])
+                    if index in held_cards:
+                        held_cards.remove(index)
+                        selection = _("Stop recommending hold on {}").format(card)
+                    else:
+                        held_cards.add(index)
+                        selection = _("Hold {}").format(card)
+                    await self.advice.send_selection(interaction, selection)
+                    await self._update_player_advice()
+                    return
+
+                if index in self.held:
+                    self.held.remove(index)
+                else:
+                    self.held.add(index)
+                self._update_card_buttons()
+                await interaction.response.edit_message(
+                    embed=self.hand_embed(), view=self
                 )
-                return
-            if index in self.held:
-                self.held.remove(index)
-            else:
-                self.held.add(index)
-            self._update_card_buttons()
-            await interaction.response.edit_message(embed=self.hand_embed(), view=self)
 
         return callback
 
     async def _draw_callback(self, interaction):
-        if self.finished:
-            await interaction.response.send_message(
-                _("This hand has already finished."), ephemeral=True
-            )
-            return
+        async with self.vote_lock:
+            if self.finished:
+                await interaction.response.send_message(
+                    _("This hand has already finished."),
+                    ephemeral=True,
+                    delete_after=60,
+                )
+                return
+            user_id = interaction.user.id
+            if user_id in self.eunuch_ids:
+                if user_id in self.eunuch_draw_votes:
+                    self.eunuch_draw_votes.remove(user_id)
+                    selection = _("Withdraw your draw recommendation")
+                else:
+                    self.eunuch_draw_votes.add(user_id)
+                    selection = _("Draw")
+                await self.advice.send_selection(interaction, selection)
+                await self._update_player_advice()
+                return
 
-        self.finished = True
-        for index in range(len(self.hand)):
-            if index not in self.held:
-                self.hand[index] = self.deck.draw()
+            self.finished = True
+            for index in range(len(self.hand)):
+                if index not in self.held:
+                    self.hand[index] = self.deck.draw()
 
-        hand_name, payout = evaluate_hand(self.hand)
-        if hand_name == "Royal Flush" and self.bet == self.max_bet:
-            payout = 800
-        result_embed = self.result_embed(hand_name, payout)
-        self.result = (payout > 0, self.bet * payout, result_embed, self.message)
-        self._disable_items()
-        await interaction.response.edit_message(embed=result_embed, view=self)
-        self.stop()
+            hand_name, payout = evaluate_hand(self.hand)
+            if hand_name == "Royal Flush" and self.bet == self.max_bet:
+                payout = 800
+            result_embed = self.result_embed(hand_name, payout)
+            self.result = (payout > 0, self.bet * payout, result_embed, self.message)
+            self._disable_items()
+            await interaction.response.edit_message(embed=result_embed, view=self)
+            self.stop()
 
     def _update_card_buttons(self):
         for index, button in enumerate(self.card_buttons):
@@ -216,14 +281,23 @@ class VideoPokerView(discord.ui.View):
 
 
 class VideoPoker:
-    def __init__(self, max_bet):
+    def __init__(self, max_bet, eunuch_ids=()):
         self.view = None
         self.max_bet = max_bet
+        self.eunuch_ids = eunuch_ids
 
     async def play(self, ctx, bet):
         deck = Deck()
         hand = deck.deal(5)
-        self.view = VideoPokerView(ctx.author.id, hand, bet, self.max_bet, deck)
+        self.view = VideoPokerView(
+            ctx.author.id,
+            hand,
+            bet,
+            self.max_bet,
+            deck,
+            eunuch_ids=self.eunuch_ids,
+        )
+        await self.view.start_player_advice(getattr(ctx, "interaction", None))
         self.view.message = await ctx.send(embed=self.view.hand_embed(), view=self.view)
 
         if await self.view.wait():

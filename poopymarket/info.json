@@ -1,0 +1,19 @@
+{
+	"author": [
+		"ComradeCactus"
+	],
+	"description": "Work in progress. A prediction market simulator that uses credits to place bets on various outcomes.",
+	"install_msg": "This cog is unfinished. It probably won't even load.",
+	"short": "Stock market simulator using tots and real prices (WIP)",
+	"tags": [
+		"stocks",
+		"economy",
+		"game",
+		"wip"
+	],
+	"requirements": [
+		"requests"
+	],
+	"end_user_data_statement": "This cog does not currently persistently store end user data.",
+	"type": "COG"
+}

@@ -6,7 +6,7 @@ import calendar
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional, Union, Final, Literal
+from typing import Optional, Final, Literal
 from operator import itemgetter
 
 
@@ -87,10 +87,26 @@ class Casino(Database, commands.Cog):
         self, *, requester: Literal["discord", "owner", "user", "user_strict"], user_id: int
     ):
         await super().config.user_from_id(user_id).clear()
+        all_users = await super().config.all_users()
+        for other_user_id, user_data in all_users.items():
+            eunuchs = user_data.get("Scheming_Eunuchs", [])
+            if user_id in eunuchs:
+                await self.config.user_from_id(int(other_user_id)).Scheming_Eunuchs.set(
+                    [eunuch_id for eunuch_id in eunuchs if eunuch_id != user_id]
+                )
+
         all_members = await super().config.all_members()
         async for guild_id, guild_data in AsyncIter(all_members.items(), steps=100):
             if user_id in guild_data:
                 await super().config.member_from_ids(guild_id, user_id).clear()
+            for other_user_id, member_data in guild_data.items():
+                eunuchs = member_data.get("Scheming_Eunuchs", [])
+                if user_id in eunuchs:
+                    await self.config.member_from_ids(
+                        int(guild_id), int(other_user_id)
+                    ).Scheming_Eunuchs.set(
+                        [eunuch_id for eunuch_id in eunuchs if eunuch_id != user_id]
+                    )
         removed_tickets = await self.lotto_store.delete_user(user_id)
         for guild_id, tickets in removed_tickets.items():
             guild = self.bot.get_guild(int(guild_id))
@@ -135,7 +151,12 @@ class Casino(Database, commands.Cog):
         Blackjack supports doubling down, but not split.
         """
         await ctx.defer()
-        await Blackjack().play(ctx, bet)
+        eunuchs = await self._scheming_eunuchs(ctx)
+        await Blackjack(eunuchs).play(ctx, bet)
+
+    async def _scheming_eunuchs(self, ctx):
+        player_data = await super().get_data(ctx, player=ctx.author)
+        return await player_data.Scheming_Eunuchs()
 
     @commands.hybrid_command(description="Play a modified pass-line craps game.")
     @commands.guild_only()
@@ -225,7 +246,8 @@ class Casino(Database, commands.Cog):
         you cash out or lose it all.
         """
         await ctx.defer()
-        await Double().play(ctx, bet)
+        eunuchs = await self._scheming_eunuchs(ctx)
+        await Double(eunuchs).play(ctx, bet)
 
     @commands.hybrid_command(
         aliases=["hl"],
@@ -279,7 +301,11 @@ class Casino(Database, commands.Cog):
             return
 
         settings = await (await engine.get_data(ctx)).all()
-        game = VideoPoker(settings["Games"]["Videopoker"]["Max"])
+        eunuchs = await self._scheming_eunuchs(ctx)
+        game = VideoPoker(
+            settings["Games"]["Videopoker"]["Max"],
+            eunuch_ids=eunuchs,
+        )
         result = await game.play(ctx, bet)
         if result is None:
             try:
@@ -304,8 +330,15 @@ class Casino(Database, commands.Cog):
 
         await engine.game_teardown(result, force_edit=True)
 
-    @commands.command(hidden=True)
+    @commands.hybrid_command(
+        hidden=True,
+        description="Owner-only test command for simulated blackjack hands.",
+    )
     @commands.is_owner()
+    @discord.app_commands.describe(
+        bet="The test wager.",
+        hands="Player and dealer hands separated by a vertical bar.",
+    )
     async def bjmock(self, ctx, bet: int, *, hands: str):
         """Test function for blackjack
 
@@ -321,7 +354,10 @@ class Casino(Database, commands.Cog):
 
     # --------------------------------------------------------------------------------------------------
 
-    @commands.group()
+    @commands.hybrid_group(
+        description="View casino information, player statistics, and manage casino users.",
+        invoke_without_command=True,
+    )
     @commands.guild_only()
     async def casino(self, ctx):
         """Interacts with the Casino system.
@@ -330,7 +366,70 @@ class Casino(Database, commands.Cog):
         """
         pass
 
-    @casino.command()
+    @casino.group(
+        name="users",
+        description="Manage your designated scheming eunuchs.",
+        invoke_without_command=True,
+    )
+    async def casino_users(self, ctx: commands.Context):
+        """Manage the users who can vote on your in-game choices."""
+        await ctx.send_help()
+
+    @casino_users.command(
+        name="add",
+        description="Designate a user as one of your scheming eunuchs.",
+    )
+    @discord.app_commands.describe(
+        user="The user to allow to vote on your Blackjack and Double choices."
+    )
+    async def add_eunuch(self, ctx: commands.Context, user: discord.User):
+        if user.id == ctx.author.id:
+            return await ctx.send(_("You cannot designate yourself as a scheming eunuch."))
+
+        player_data = await super().get_data(ctx, player=ctx.author)
+        eunuchs = await player_data.Scheming_Eunuchs()
+        if user.id in eunuchs:
+            return await ctx.send(_("{} is already one of your scheming eunuchs.").format(user))
+        if len(eunuchs) >= 2:
+            return await ctx.send(_("You can designate no more than two scheming eunuchs."))
+
+        eunuchs.append(user.id)
+        await player_data.Scheming_Eunuchs.set(eunuchs)
+        await ctx.send(_("{} has been designated as one of your scheming eunuchs.").format(user))
+
+    @casino_users.command(
+        name="remove",
+        description="Remove a user's scheming eunuch designation.",
+    )
+    @discord.app_commands.describe(
+        user="The scheming eunuch to remove."
+    )
+    async def remove_eunuch(self, ctx: commands.Context, user: discord.User):
+        player_data = await super().get_data(ctx, player=ctx.author)
+        eunuchs = await player_data.Scheming_Eunuchs()
+        if user.id not in eunuchs:
+            return await ctx.send(_("{} is not one of your scheming eunuchs.").format(user))
+
+        eunuchs.remove(user.id)
+        await player_data.Scheming_Eunuchs.set(eunuchs)
+        await ctx.send(_("{} is no longer one of your scheming eunuchs.").format(user))
+
+    @casino_users.command(
+        name="list",
+        description="List your scheming eunuchs.",
+    )
+    async def list_eunuchs(self, ctx: commands.Context):
+        player_data = await super().get_data(ctx, player=ctx.author)
+        eunuchs = await player_data.Scheming_Eunuchs()
+        if not eunuchs:
+            return await ctx.send(_("You have not designated any scheming eunuchs."))
+        await ctx.send(
+            _("Your scheming eunuchs: {}").format(
+                ", ".join("<@{}>".format(user_id) for user_id in eunuchs)
+            )
+        )
+
+    @casino.command(description="View the available casino memberships.")
     async def memberships(self, ctx):
         """Displays a list of server/global memberships."""
         data = await super().get_data(ctx)
@@ -382,9 +481,10 @@ class Casino(Database, commands.Cog):
         embed.set_footer(text=info)
         await ctx.send(embed=embed)
 
-    @casino.command()
+    @casino.command(description="Release a user's pending casino winnings.")
     @checks.admin_or_permissions(administrator=True)
-    async def releasecredits(self, ctx, player: Union[discord.Member, discord.User]):
+    @discord.app_commands.describe(player="The user whose pending winnings to release.")
+    async def releasecredits(self, ctx, player: discord.User):
         """Approves pending currency for a user.
 
         If this casino has maximum winnings threshold set, and a user makes a bet that
@@ -430,8 +530,9 @@ class Casino(Database, commands.Cog):
         else:
             await ctx.send(_("Action canceled."))
 
-    @casino.command()
+    @casino.command(description="Reset a user's casino cooldowns, statistics, or all data.")
     @checks.admin_or_permissions(administrator=True)
+    @discord.app_commands.describe(user="The server member whose casino data to reset.")
     async def resetuser(self, ctx: commands.Context, user: discord.Member):
         """Reset a user's cooldowns, stats, or everything."""
 
@@ -454,7 +555,7 @@ class Casino(Database, commands.Cog):
         else:
             await super()._reset_player_all(ctx, user)
 
-    @casino.command()
+    @casino.command(description="Reset casino settings, games, cooldowns, memberships, or all.")
     @checks.admin_or_permissions(administrator=True)
     async def resetinstance(self, ctx: commands.Context):
         """Reset global/server cooldowns, settings, memberships, or everything."""
@@ -482,7 +583,7 @@ class Casino(Database, commands.Cog):
         else:
             await super()._reset_all_settings(ctx)
 
-    @casino.command()
+    @casino.command(description="Wipe all casino and user data.")
     @checks.is_owner()
     async def wipe(self, ctx: commands.Context):
         """Completely wipes casino data."""
@@ -521,12 +622,16 @@ class Casino(Database, commands.Cog):
         else:
             return await ctx.send(_("Wipe canceled."))
 
-    @casino.command()
+    @casino.command(description="Manually assign a casino membership to a user.")
     @checks.admin_or_permissions(administrator=True)
+    @discord.app_commands.describe(
+        player="The user to assign the membership to.",
+        membership="The registered membership name to assign.",
+    )
     async def assignmem(
         self,
         ctx: commands.Context,
-        player: Union[discord.Member, discord.User],
+        player: discord.User,
         *,
         membership: str,
     ):
@@ -550,9 +655,10 @@ class Casino(Database, commands.Cog):
         )
         await ctx.send(msg)
 
-    @casino.command()
+    @casino.command(description="Revoke a user's manually assigned casino membership.")
     @checks.admin_or_permissions(administrator=True)
-    async def revokemem(self, ctx: commands.Context, player: Union[discord.Member, discord.User]):
+    @discord.app_commands.describe(player="The user whose assigned membership to revoke.")
+    async def revokemem(self, ctx: commands.Context, player: discord.User):
         """Revoke an assigned membership.
 
         Members will still keep this membership until the next auto cycle (5mins).
@@ -571,7 +677,7 @@ class Casino(Database, commands.Cog):
             ).format(ctx.author.name, player.name)
         )
 
-    @casino.command()
+    @casino.command(description="Show the casino administration command list.")
     @checks.admin_or_permissions(administrator=True)
     async def admin(self, ctx: commands.Context):
         """A list of Admin level and above commands for Casino."""
@@ -624,7 +730,9 @@ class Casino(Database, commands.Cog):
         ).format(t, **settings)
         return box(msg, lang="cpp")
 
-    @casino.command()
+    @casino.command(
+        description="Show casino settings, games, and current betting limits."
+    )
     async def info(self, ctx: commands.Context):
         """Shows information about Casino.
 
@@ -634,20 +742,6 @@ class Casino(Database, commands.Cog):
         server (or global) if enabled.
         """
         await ctx.send(await self._casino_info_text(ctx))
-
-    casino_app = discord.app_commands.Group(
-        name="casino",
-        description="View current casino settings and betting limits.",
-    )
-
-    @casino_app.command(
-        name="info",
-        description="Show this server's casino settings and current game limits.",
-    )
-    @discord.app_commands.guild_only()
-    async def casino_info_slash(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        await interaction.followup.send(await self._casino_info_text(interaction))
 
     @commands.hybrid_command(
         name="lotto",
@@ -1169,9 +1263,10 @@ class Casino(Database, commands.Cog):
                     guild.id,
                 )
 
-    @casino.command()
+    @casino.command(description="Show a user's casino play statistics.")
+    @discord.app_commands.describe(player="The user whose casino statistics to show.")
     async def stats(
-        self, ctx: commands.Context, player: Union[discord.Member, discord.User] = None
+        self, ctx: commands.Context, player: discord.User = None
     ):
         """Shows your play statistics for Casino"""
         if player is None:
@@ -1211,7 +1306,7 @@ class Casino(Database, commands.Cog):
         embed.set_footer(text=disclaimer)
         await ctx.send(embed=embed)
 
-    @casino.command()
+    @casino.command(description="Create, edit, or delete casino memberships.")
     @commands.max_concurrency(1, commands.BucketType.guild)
     @checks.admin_or_permissions(administrator=True)
     async def memdesigner(self, ctx: commands.Context):
@@ -1228,7 +1323,7 @@ class Casino(Database, commands.Cog):
 
         await Membership(ctx, timeout, choice.content.lower()).process()
 
-    @casino.command()
+    @casino.command(description="Show the installed Casino cog version.")
     async def version(self, ctx: commands.Context):
         """Shows the current Casino version."""
         await ctx.send("Casino is running version {}.".format(__version__))
@@ -1242,14 +1337,20 @@ class Casino(Database, commands.Cog):
             return True
 
     @commands.check(global_casino_only)
-    @commands.group()
+    @commands.hybrid_group(
+        description="Configure casino settings and game rules.",
+        invoke_without_command=True,
+    )
     @commands.guild_only()
     @checks.admin_or_permissions(administrator=True)
     async def casinoset(self, ctx: commands.Context):
         """Changes Casino settings"""
         pass
 
-    @casinoset.command(name="oldstyle")
+    @casinoset.command(
+        name="oldstyle",
+        description="Toggle between editing game messages and sending new ones.",
+    )
     async def change_style(self, ctx: commands.Context):
         """Toggle between editing and sending new messages for casino games.."""
 
@@ -1262,7 +1363,10 @@ class Casino(Database, commands.Cog):
             )
         )
 
-    @casinoset.command(name="mode")
+    @casinoset.command(
+        name="mode",
+        description="Switch the casino between global and server-local modes.",
+    )
     @checks.is_owner()
     async def mode(self, ctx: commands.Context):
         """Toggles Casino between global and local modes.
@@ -1312,7 +1416,8 @@ class Casino(Database, commands.Cog):
         else:
             await ctx.send(_("Casino will remain {}.").format(mode))
 
-    @casinoset.command()
+    @casinoset.command(description="Set the winnings threshold for payout review.")
+    @discord.app_commands.describe(limit="Winnings above this amount are held for review.")
     async def payoutlimit(self, ctx: commands.Context, limit: int):
         """Sets a payout limit.
 
@@ -1329,7 +1434,7 @@ class Casino(Database, commands.Cog):
         msg = _("{0.name} ({0.id}) set the payout limit to {1}.").format(ctx.author, limit)
         await ctx.send(msg)
 
-    @casinoset.command()
+    @casinoset.command(description="Toggle review limits for casino winnings.")
     async def payouttoggle(self, ctx: commands.Context):
         """Turns on a payout limit.
 
@@ -1342,7 +1447,7 @@ class Casino(Database, commands.Cog):
         msg = _("{0.name} ({0.id}) turned the payout limit {1}.").format(ctx.author, "OFF" if status else "ON")
         await ctx.send(msg)
 
-    @casinoset.command()
+    @casinoset.command(description="Open or close the casino for games.")
     async def toggle(self, ctx: commands.Context):
         """Opens and closes the Casino for use.
 
@@ -1356,7 +1461,8 @@ class Casino(Database, commands.Cog):
         msg = _("{0.name} ({0.id}) {2} the {1} Casino.").format(ctx.author, name, "closed" if status else "opened")
         await ctx.send(msg)
 
-    @casinoset.command()
+    @casinoset.command(description="Set the casino's display name.")
+    @discord.app_commands.describe(name="The casino name, up to 30 characters.")
     async def name(self, ctx: commands.Context, *, name: str):
         """Sets the name of the Casino.
 
@@ -1370,7 +1476,11 @@ class Casino(Database, commands.Cog):
         msg = _("{0.name} ({0.id}) set the casino name to {1}.").format(ctx.author, name)
         await ctx.send(msg)
 
-    @casinoset.command()
+    @casinoset.command(description="Set a game's payout multiplier.")
+    @discord.app_commands.describe(
+        game="The casino game to configure.",
+        multiplier="The payout multiplier to apply.",
+    )
     async def multiplier(self, ctx: commands.Context, game: str, multiplier: float):
         """Sets the payout multiplier for a game.
         """
@@ -1394,7 +1504,11 @@ class Casino(Database, commands.Cog):
             )
         await ctx.send(msg)
 
-    @casinoset.command()
+    @casinoset.command(description="Set a game's cooldown duration.")
+    @discord.app_commands.describe(
+        game="The casino game to configure.",
+        cooldown="Cooldown in seconds or DD:HH:MM:SS format.",
+    )
     async def cooldown(self, ctx: commands.Context, game: str, cooldown: str):
         """Sets the cooldown for a game.
 
@@ -1422,7 +1536,8 @@ class Casino(Database, commands.Cog):
         msg = _("{0.name} ({0.id}) set {1}'s cooldown to {2}.").format(ctx.author, game.title(), cool)
         await ctx.send(msg)
 
-    @casinoset.command(name="min")
+    @casinoset.command(name="min", description="Set a game's minimum bet.")
+    @discord.app_commands.describe(game="The casino game to configure.", minimum="The minimum bet.")
     async def _min(self, ctx: commands.Context, game: str, minimum: int):
         """Sets the minimum bid for a game."""
         settings = await super().get_data(ctx)
@@ -1444,7 +1559,8 @@ class Casino(Database, commands.Cog):
         msg = _("{0.name} ({0.id}) set {1}'s minimum bid to {2}.").format(ctx.author, game.title(), minimum)
         await ctx.send(msg)
 
-    @casinoset.command(name="max")
+    @casinoset.command(name="max", description="Set a game's maximum bet.")
+    @discord.app_commands.describe(game="The casino game to configure.", maximum="The maximum bet.")
     async def _max(self, ctx: commands.Context, game: str, maximum: int):
         """Sets the maximum bid for a game."""
         settings = await super().get_data(ctx)
@@ -1466,7 +1582,11 @@ class Casino(Database, commands.Cog):
         msg = _("{0.name} ({0.id}) set {1}'s maximum bid to {2}.").format(ctx.author, game.title(), maximum)
         await ctx.send(msg)
 
-    @casinoset.command()
+    @casinoset.command(description="Set the membership access level required for a game.")
+    @discord.app_commands.describe(
+        game="The casino game to configure.",
+        access="The required membership access level.",
+    )
     async def access(self, ctx, game: str, access: int):
         """Sets the access level required to play a game.
 
@@ -1485,7 +1605,8 @@ class Casino(Database, commands.Cog):
         msg = _("{0.name} ({0.id}) changed the access level for {1} to {2}.").format(ctx.author, game, access)
         await ctx.send(msg)
 
-    @casinoset.command()
+    @casinoset.command(description="Open or close a specific game.")
+    @discord.app_commands.describe(game="The casino game to open or close.")
     async def gametoggle(self, ctx, game: str):
         """Opens/Closes a specific game for use."""
         instance = await super().get_data(ctx)

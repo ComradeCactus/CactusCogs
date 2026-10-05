@@ -148,3 +148,83 @@ def test_draw_keeps_held_cards_and_returns_payout():
         assert all(button.disabled for button in view.children)
 
     asyncio.run(run_test())
+
+
+def test_scheming_eunuch_video_poker_votes_are_private_and_non_binding():
+    class FakeResponse:
+        def __init__(self):
+            self.messages = []
+
+        async def send_message(self, *args, **kwargs):
+            self.messages.append((args, kwargs))
+
+    class FakeMessage:
+        def __init__(self, content):
+            self.content = content
+            self.delete_delay = None
+
+        async def edit(self, **kwargs):
+            self.content = kwargs["content"]
+
+        async def delete(self, delay=None):
+            self.delete_delay = delay
+
+    class FakeFollowup:
+        def __init__(self):
+            self.messages = []
+
+        async def send(self, content, **kwargs):
+            message = FakeMessage(content)
+            self.messages.append((message, kwargs))
+            return message
+
+    class EmptyDeck:
+        def draw(self):
+            raise AssertionError("Eunuch votes must not draw cards.")
+
+    def interaction(user_id):
+        return SimpleNamespace(
+            user=SimpleNamespace(id=user_id),
+            response=FakeResponse(),
+            followup=FakeFollowup(),
+        )
+
+    async def run_test():
+        hand = cards(["Jack", "Jack", 2, 5, 8])
+        view = VideoPokerView(
+            42,
+            hand,
+            100,
+            500,
+            EmptyDeck(),
+            eunuch_ids=(7,),
+        )
+        player = interaction(42)
+        await view.start_player_advice(player)
+        advice_message, advice_kwargs = player.followup.messages[0]
+        assert advice_kwargs["ephemeral"]
+        assert advice_message.delete_delay == 60
+        assert advice_message.content.endswith("No votes yet.")
+        assert len(view.children) == 6
+
+        outsider = interaction(99)
+        assert not await view.interaction_check(outsider)
+        assert outsider.response.messages[0][0][0] == (
+            "Only the player can interact with this game."
+        )
+
+        eunuch = interaction(7)
+        assert await view.interaction_check(eunuch)
+        await view.card_buttons[0].callback(eunuch)
+        assert 0 not in view.held
+        assert advice_message.content.endswith("Hold J♣ (<@7>)")
+        assert eunuch.response.messages[-1][0][0] == (
+            "Your selection has been sent: Hold J♣"
+        )
+
+        await view.draw_button.callback(eunuch)
+        assert not view.finished
+        assert view.result is None
+        assert advice_message.content.endswith("Hold J♣ (<@7>), Draw (<@7>)")
+
+    asyncio.run(run_test())

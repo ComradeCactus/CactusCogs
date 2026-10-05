@@ -1,6 +1,7 @@
 # Standard Library
 import asyncio
 import random
+import time
 
 # Casino
 from .deck import Deck
@@ -20,12 +21,50 @@ import discord
 _ = Translator("Casino", __file__)
 
 
+class _EunuchAdvice:
+    def __init__(self, state=None):
+        self.state = state if state is not None else {
+            "message": None,
+            "expires_at": None,
+        }
+
+    async def start(self, interaction, content):
+        if interaction is None or self.state["message"] is not None:
+            return
+        self.state["message"] = await interaction.followup.send(
+            content,
+            ephemeral=True,
+            wait=True,
+        )
+        self.state["expires_at"] = time.monotonic() + 60
+        await self.state["message"].delete(delay=60)
+
+    async def send_selection(self, interaction, selection):
+        await interaction.response.send_message(
+            _("Your selection has been sent: {}").format(selection),
+            ephemeral=True,
+            delete_after=60,
+        )
+
+    async def update(self, content):
+        if (
+            self.state["message"] is not None
+            and time.monotonic() < self.state["expires_at"]
+        ):
+            await self.state["message"].edit(content=content)
+
+
 class _BoundChoiceView(discord.ui.View):
-    def __init__(self, owner_id, choices):
+    def __init__(self, owner_id, choices, eunuch_ids=(), advice_state=None):
         super().__init__(timeout=35.0)
         self.owner_id = owner_id
+        self.eunuch_ids = set(eunuch_ids)
         self.choice = None
         self.message = None
+        self.advice = _EunuchAdvice(advice_state)
+        self.eunuch_votes = {}
+        self.vote_lock = asyncio.Lock()
+        self.choice_labels = {value: label for value, label, _ in choices}
 
         for value, label, style in choices:
             button = discord.ui.Button(label=label, style=style)
@@ -33,31 +72,61 @@ class _BoundChoiceView(discord.ui.View):
             self.add_item(button)
 
     async def interaction_check(self, interaction):
-        if interaction.user.id != self.owner_id:
+        if interaction.user.id != self.owner_id and interaction.user.id not in self.eunuch_ids:
             await interaction.response.send_message(
-                _("Only the player who started this game can use these buttons."),
+                _("Only the player can interact with this game."),
                 ephemeral=True,
+                delete_after=60,
             )
             return False
         return True
 
+    def _advice_text(self):
+        votes = [
+            "{} (<@{}>)".format(self.choice_labels[choice], user_id)
+            for user_id, choice in self.eunuch_votes.items()
+        ]
+        advice = ", ".join(votes) if votes else _("No votes yet.")
+        return _("Your eunuchs have offered you the following advice... {}").format(advice)
+
+    async def _send_player_advice(self, interaction):
+        if self.eunuch_ids:
+            await self.advice.start(interaction, self._advice_text())
+
+    async def _update_advice_message(self):
+        await self.advice.update(self._advice_text())
+
     def _choice_callback(self, value):
         async def callback(interaction):
-            if self.choice is not None:
-                await interaction.response.send_message(
-                    _("This choice menu has already been used."), ephemeral=True
-                )
-                return
+            async with self.vote_lock:
+                user_id = interaction.user.id
+                if self.choice is not None:
+                    await interaction.response.send_message(
+                        _("This choice menu has already been used."),
+                        ephemeral=True,
+                        delete_after=60,
+                    )
+                    return
 
-            self.choice = value
-            for item in self.children:
-                item.disabled = True
-            await interaction.response.edit_message(view=self)
-            self.stop()
+                if user_id in self.eunuch_ids:
+                    self.eunuch_votes[user_id] = value
+                    await self.advice.send_selection(
+                        interaction, self.choice_labels[value]
+                    )
+                    await self._update_advice_message()
+                    return
+
+                self.choice = value
+                for item in self.children:
+                    item.disabled = True
+                await interaction.response.edit_message(view=self)
+                self.stop()
 
         return callback
 
     async def prompt(self, ctx, embed, message=None):
+        await self._send_player_advice(getattr(ctx, "interaction", None))
+
         if message is None:
             self.message = await ctx.send(
                 content=ctx.author.mention, embed=embed, view=self
@@ -226,8 +295,10 @@ class Blackjack:
     can double down.
     """
 
-    def __init__(self):
+    def __init__(self, eunuch_ids=()):
         self.deck = Deck()
+        self.eunuch_ids = eunuch_ids
+        self.advice_state = {"message": None, "expires_at": None}
 
     @game_engine(name="Blackjack")
     async def play(self, ctx, bet):
@@ -307,7 +378,12 @@ class Blackjack:
             return ph, dh, amount, message
 
     async def _choose(self, ctx, embed, choices, message=None):
-        view = _BoundChoiceView(ctx.author.id, choices)
+        view = _BoundChoiceView(
+            ctx.author.id,
+            choices,
+            self.eunuch_ids,
+            advice_state=self.advice_state,
+        )
         return await view.prompt(ctx, embed, message=message)
 
     async def blackjack_results(self, ctx, amount, ph, dh, message=None):
@@ -504,6 +580,10 @@ class War:
 class Double:
     """A simple class for the Double Or Nothing game."""
 
+    def __init__(self, eunuch_ids=()):
+        self.eunuch_ids = eunuch_ids
+        self.advice_state = {"message": None, "expires_at": None}
+
     @game_engine("Double")
     async def play(self, ctx, bet):
         count, amount, message = await self.double_game(ctx, bet)
@@ -539,6 +619,8 @@ class Double:
                 ("double", _("Double"), discord.ButtonStyle.primary),
                 ("cash out", _("Cash Out"), discord.ButtonStyle.secondary),
             ),
+            self.eunuch_ids,
+            advice_state=self.advice_state,
         )
         return await view.prompt(ctx, embed, message=message)
 

@@ -11,6 +11,7 @@ from .utils import is_input_unsupported, min_int, max_int
 
 user_defaults = {
     "Pending_Credits": 0,
+    "Scheming_Eunuchs": [],
     "Membership": {"Name": "Basic", "Assigned": False},
     "Played": {
         "Allin": 0,
