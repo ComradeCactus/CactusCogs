@@ -297,8 +297,8 @@ class VideoPoker:
             deck,
             eunuch_ids=self.eunuch_ids,
         )
-        await self.view.start_player_advice(getattr(ctx, "interaction", None))
         self.view.message = await ctx.send(embed=self.view.hand_embed(), view=self.view)
+        await self.view.start_player_advice(getattr(ctx, "interaction", None))
 
         if await self.view.wait():
             return None

@@ -133,6 +133,44 @@ def test_eunuch_votes_update_private_player_advice_without_changing_choice():
         assert all(item.disabled for item in view.children)
 
     asyncio.run(run_test())
+    asyncio.run(run_test())
+
+def test_player_advice_follows_the_public_game_prompt():
+    class ImmediateView(_BoundChoiceView):
+        async def wait(self):
+            return True
+
+    class FakeMessage:
+        async def delete(self, delay=None):
+            pass
+
+    class FakeFollowup:
+        async def send(self, content, **kwargs):
+            events.append(("advice", kwargs["ephemeral"]))
+            return FakeMessage()
+
+    class FakeContext:
+        author = SimpleNamespace(mention="<@42>")
+
+        def __init__(self):
+            self.interaction = SimpleNamespace(followup=FakeFollowup())
+
+        async def send(self, **kwargs):
+            events.append("game")
+            return FakeMessage()
+
+    async def run_test():
+        view = ImmediateView(
+            42,
+            (("hit", "Hit", discord.ButtonStyle.primary),),
+            eunuch_ids=(7,),
+        )
+        result = await view.prompt(FakeContext(), discord.Embed())
+        assert result[0] is None
+        assert events == ["game", ("advice", True)]
+
+    events = []
+    asyncio.run(run_test())
 
 
 def test_scheming_eunuch_user_commands_are_hybrid_subcommands():

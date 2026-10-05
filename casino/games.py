@@ -125,8 +125,6 @@ class _BoundChoiceView(discord.ui.View):
         return callback
 
     async def prompt(self, ctx, embed, message=None):
-        await self._send_player_advice(getattr(ctx, "interaction", None))
-
         if message is None:
             self.message = await ctx.send(
                 content=ctx.author.mention, embed=embed, view=self
@@ -136,6 +134,8 @@ class _BoundChoiceView(discord.ui.View):
             await message.edit(
                 content=ctx.author.mention, embed=embed, view=self
             )
+
+        await self._send_player_advice(getattr(ctx, "interaction", None))
 
         if await self.wait():
             return None, self.message
