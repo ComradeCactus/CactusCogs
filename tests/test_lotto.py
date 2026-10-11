@@ -133,6 +133,12 @@ def test_drawing_and_ticket_settlements_survive_scheduler_retries(tmp_path):
     async def run_test():
         path = tmp_path / "lotto.json"
         store = LottoStore(path)
+        payouts = {
+            "exact": 10000,
+            "unordered": 1000,
+            "three_ordered": 150,
+            "three_any": 50,
+        }
         draw_date, tickets = await store.add_tickets(
             7,
             time(20, 0),
@@ -140,7 +146,9 @@ def test_drawing_and_ticket_settlements_survive_scheduler_retries(tmp_path):
             [[1, 2, 3, 4, 5, 6]],
             now=datetime(2026, 10, 4, 19, 0, tzinfo=timezone.utc),
         )
-        drawing = await store.begin_drawing(7, draw_date, [1, 2, 3, 4, 5, 6])
+        drawing = await store.begin_drawing(
+            7, draw_date, [1, 2, 3, 4, 5, 6], payouts=payouts
+        )
         await store.settle_ticket(
             7, draw_date, tickets[0]["ticket_id"], paid=1000, pending=0
         )
@@ -148,12 +156,18 @@ def test_drawing_and_ticket_settlements_survive_scheduler_retries(tmp_path):
         reloaded = LottoStore(path)
         assert await reloaded.expire_before(7, "2026-10-05") == []
         assert await reloaded.drawing_dates(7) == [draw_date]
-        retried = await reloaded.begin_drawing(7, draw_date, [6, 5, 4, 3, 2, 1])
+        retried = await reloaded.begin_drawing(
+            7,
+            draw_date,
+            [6, 5, 4, 3, 2, 1],
+            payouts={"exact": 1},
+        )
         settlement = await reloaded.settle_ticket(
             7, draw_date, tickets[0]["ticket_id"], paid=2000, pending=0
         )
 
         assert retried["numbers"] == drawing["numbers"]
+        assert retried["payouts"] == payouts
         assert settlement == {"paid": 1000, "pending": 0}
         assert retried["settlements"][tickets[0]["ticket_id"]] == settlement
         assert await reloaded.tickets(7, draw_date) == tickets

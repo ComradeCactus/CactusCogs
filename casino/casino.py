@@ -12,7 +12,7 @@ from operator import itemgetter
 
 # Casino
 from . import utils
-from .data import Database
+from .data import Database, LOTTO_DEFAULT_PAYOUTS
 from .games import Core, Blackjack, Double, War
 from .utils import is_input_unsupported
 from .engine import GameEngine
@@ -50,16 +50,92 @@ _ = Translator("Casino", __file__)
 log = logging.getLogger("red.jumper-plugins.casino")
 _SCHEMA_VERSION: Final[int] = 2
 LOTTO_TICKET_PRICE: Final[int] = 50
-LOTTO_UNORDERED_JACKPOT: Final[int] = 1_000_000
-LOTTO_EXACT_JACKPOT: Final[int] = 10_000_000
-LOTTO_THREE_ORDERED_PRIZE: Final[int] = 150_000
-LOTTO_THREE_ANY_PRIZE: Final[int] = 50_000
 LOTTO_TIER_LABELS: Final[dict] = {
     "exact": "the exact-order jackpot",
     "unordered": "the any-order jackpot",
     "three_ordered": "matching 3 in order",
     "three_any": "matching 3 numbers",
 }
+
+
+class _LottoTicketsView(discord.ui.View):
+    def __init__(self, owner_id, tickets):
+        super().__init__(timeout=180)
+        self.owner_id = owner_id
+        self.tickets = tickets
+        self.page = 0
+        self.message = None
+
+        self.next_button = discord.ui.Button(
+            label=_("Next"), style=discord.ButtonStyle.secondary
+        )
+        self.next_button.callback = self.next_page
+        self.add_item(self.next_button)
+
+        self.previous_button = discord.ui.Button(
+            label=_("Previous"), style=discord.ButtonStyle.secondary
+        )
+        self.previous_button.callback = self.previous_page
+        self.add_item(self.previous_button)
+
+        self.dismiss_button = discord.ui.Button(
+            label=_("Dismiss"), style=discord.ButtonStyle.danger
+        )
+        self.dismiss_button.callback = self.dismiss
+        self.add_item(self.dismiss_button)
+        self._update_controls()
+
+    def embed(self):
+        page_count = (len(self.tickets) + 9) // 10
+        page_tickets = self.tickets[self.page * 10 : (self.page + 1) * 10]
+        lines = [
+            "{}: {}".format(
+                ticket["draw_date"],
+                " ".join("{:02d}".format(number) for number in ticket["numbers"]),
+            )
+            for ticket in page_tickets
+        ]
+        embed = discord.Embed(
+            title=_("You have {} active lotto ticket(s)").format(len(self.tickets)),
+            description="\n".join(lines),
+        )
+        embed.set_footer(
+            text=_("Page {} of {}").format(self.page + 1, page_count)
+        )
+        return embed
+
+    def _update_controls(self):
+        page_count = (len(self.tickets) + 9) // 10
+        self.next_button.disabled = self.page >= page_count - 1
+        self.previous_button.disabled = self.page == 0
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                _("Only the user who requested these tickets can use these buttons."),
+                ephemeral=True,
+                delete_after=60,
+            )
+            return False
+        return True
+
+    async def next_page(self, interaction):
+        self.page = min(self.page + 1, (len(self.tickets) + 9) // 10 - 1)
+        self._update_controls()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def previous_page(self, interaction):
+        self.page = max(self.page - 1, 0)
+        self._update_controls()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def dismiss(self, interaction):
+        await interaction.response.defer()
+        await interaction.message.delete()
+
+    async def on_timeout(self):
+        if self.message is not None:
+            await self.message.edit(view=None)
 
 
 class Casino(Database, commands.Cog):
@@ -907,21 +983,9 @@ class Casino(Database, commands.Cog):
             return await ctx.send(_("You have no active lotto tickets."))
 
         tickets.sort(key=lambda ticket: ticket["draw_date"])
-        header = _("You have {} active lotto ticket(s):").format(len(tickets))
-        chunks = []
-        current = header
-        for ticket in tickets:
-            numbers = " ".join("{:02d}".format(number) for number in ticket["numbers"])
-            line = "\n{}: {}".format(ticket["draw_date"], numbers)
-            if len(current) + len(line) > 1800:
-                chunks.append(current)
-                current = ""
-            current += line
-        if current:
-            chunks.append(current)
-
-        for chunk in chunks:
-            await ctx.send(chunk)
+        view = _LottoTicketsView(ctx.author.id, tickets)
+        view.message = await ctx.send(embed=view.embed(), view=view)
+        return view.message
 
     @commands.hybrid_group(
         name="lottoadmin",
@@ -1002,6 +1066,7 @@ class Casino(Database, commands.Cog):
         draw_time_text = await guild_config.lotto_time()
         channel_id = await guild_config.lotto_channel()
         role_id = await guild_config.lotto_role()
+        payouts = await guild_config.lotto_payouts()
         channel = guild.get_channel(channel_id) if channel_id else None
         role = guild.get_role(role_id) if role_id else None
         next_draw = next_draw_at(
@@ -1026,10 +1091,10 @@ class Casino(Database, commands.Cog):
             role_text,
             int(next_draw.timestamp()),
             humanize_number(LOTTO_TICKET_PRICE),
-            humanize_number(LOTTO_UNORDERED_JACKPOT),
-            humanize_number(LOTTO_EXACT_JACKPOT),
-            humanize_number(LOTTO_THREE_ORDERED_PRIZE),
-            humanize_number(LOTTO_THREE_ANY_PRIZE),
+            humanize_number(payouts["unordered"]),
+            humanize_number(payouts["exact"]),
+            humanize_number(payouts["three_ordered"]),
+            humanize_number(payouts["three_any"]),
         )
 
     async def lotto_scheduler(self):
@@ -1108,8 +1173,12 @@ class Casino(Database, commands.Cog):
             )
 
     async def _run_lotto_drawing(self, guild, channel, role, draw_date, draw_time):
+        configured_payouts = await self.config.guild(guild).lotto_payouts()
         drawing = await self.lotto_store.begin_drawing(
-            guild.id, draw_date, draw_numbers()
+            guild.id,
+            draw_date,
+            draw_numbers(),
+            payouts=configured_payouts,
         )
         tickets = await self.lotto_store.tickets(guild.id, draw_date)
         drawn_numbers = drawing["numbers"]
@@ -1142,13 +1211,28 @@ class Casino(Database, commands.Cog):
         awards = {}
         # Jackpots are split between winning tickets; the smaller prizes are paid per ticket.
         payouts = [
-            ("exact", split_jackpot(LOTTO_EXACT_JACKPOT, winners["exact"])),
-            ("unordered", split_jackpot(LOTTO_UNORDERED_JACKPOT, winners["unordered"])),
+            (
+                "exact",
+                split_jackpot(drawing["payouts"]["exact"], winners["exact"]),
+            ),
+            (
+                "unordered",
+                split_jackpot(drawing["payouts"]["unordered"], winners["unordered"]),
+            ),
             (
                 "three_ordered",
-                [(t, LOTTO_THREE_ORDERED_PRIZE) for t in winners["three_ordered"]],
+                [
+                    (ticket, drawing["payouts"]["three_ordered"])
+                    for ticket in winners["three_ordered"]
+                ],
             ),
-            ("three_any", [(t, LOTTO_THREE_ANY_PRIZE) for t in winners["three_any"]]),
+            (
+                "three_any",
+                [
+                    (ticket, drawing["payouts"]["three_any"])
+                    for ticket in winners["three_any"]
+                ],
+            ),
         ]
         for tier, ticket_amounts in payouts:
             for ticket, amount in ticket_amounts:
@@ -1451,6 +1535,41 @@ class Casino(Database, commands.Cog):
         await settings.Settings.Payout_Limit.set(limit)
         msg = _("{0.name} ({0.id}) set the payout limit to {1}.").format(ctx.author, limit)
         await ctx.send(msg)
+
+    @casinoset.command(
+        name="lottopayout",
+        description="Set a daily lotto prize tier payout.",
+    )
+    @discord.app_commands.describe(
+        tier="The lotto prize tier to configure.",
+        amount="The prize amount in credits.",
+    )
+    @discord.app_commands.choices(
+        tier=[
+            discord.app_commands.Choice(name="Exact-order jackpot", value="exact"),
+            discord.app_commands.Choice(name="Any-order jackpot", value="unordered"),
+            discord.app_commands.Choice(name="3 numbers in order", value="three_ordered"),
+            discord.app_commands.Choice(name="3 numbers, any order", value="three_any"),
+        ]
+    )
+    async def lottopayout(
+        self, ctx: commands.Context, tier: str, amount: int
+    ):
+        if tier not in LOTTO_DEFAULT_PAYOUTS:
+            return await ctx.send(_("Choose a valid lotto prize tier."))
+        if amount < 0 or is_input_unsupported(amount):
+            return await ctx.send(_("Lotto payouts must be a supported non-negative amount."))
+
+        guild_config = self.config.guild(ctx.guild)
+        payouts = await guild_config.lotto_payouts()
+        payouts[tier] = amount
+        await guild_config.lotto_payouts.set(payouts)
+        await ctx.send(
+            _("Set the lotto {} payout to {} credits.").format(
+                _(LOTTO_TIER_LABELS[tier]),
+                humanize_number(amount),
+            )
+        )
 
     @casinoset.command(description="Toggle review limits for casino winnings.")
     async def payouttoggle(self, ctx: commands.Context):

@@ -144,7 +144,7 @@ class LottoStore:
             await self._run_io(self._write, data)
             return draw_date, entries
 
-    async def begin_drawing(self, guild_id, draw_date, drawn_numbers):
+    async def begin_drawing(self, guild_id, draw_date, drawn_numbers, payouts=None):
         async with self._lock:
             data = await self._run_io(self._read)
             guild_data = self._guild_data(data, guild_id)
@@ -155,8 +155,12 @@ class LottoStore:
                 drawing = {
                     "numbers": list(drawn_numbers),
                     "settlements": {},
+                    "payouts": dict(payouts or {}),
                 }
                 drawings[draw_date] = drawing
+                changed = True
+            elif payouts and "payouts" not in drawing:
+                drawing["payouts"] = dict(payouts)
                 changed = True
 
             for ticket in guild_data.get("tickets", []):
@@ -167,6 +171,7 @@ class LottoStore:
                 await self._run_io(self._write, data)
             return {
                 "numbers": list(drawing["numbers"]),
+                "payouts": dict(drawing.get("payouts", {})),
                 "settlements": {
                     ticket_id: dict(settlement)
                     for ticket_id, settlement in drawing["settlements"].items()

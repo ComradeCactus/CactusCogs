@@ -9,6 +9,13 @@ from collections import namedtuple
 from .cache import OldMessageTypeManager
 from .utils import is_input_unsupported, min_int, max_int
 
+LOTTO_DEFAULT_PAYOUTS = {
+    "exact": 10_000_000,
+    "unordered": 1_000_000,
+    "three_ordered": 150_000,
+    "three_any": 50_000,
+}
+
 user_defaults = {
     "Pending_Credits": 0,
     "Scheming_Eunuchs": [],
@@ -160,6 +167,7 @@ class Database:
             lotto_time="20:00",
             lotto_channel=None,
             lotto_role=None,
+            lotto_payouts=deepcopy(LOTTO_DEFAULT_PAYOUTS),
         )
         self.config.register_global(schema_version=1, **global_defaults)
         self.config.register_member(**member_defaults)
