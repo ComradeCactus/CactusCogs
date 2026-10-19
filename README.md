@@ -14,6 +14,7 @@ there's also ai slop in here now because it's 2026 and you can't get away from i
 | `hockeyschedule` | Updates a configured channel topic with the next game for a selected NHL team. |
 | `imageresponder` | Responds to configured triggers with a random image. |
 | `invitechecker` | Logs which invite was used when a member joins. |
+| `redditwatch` | Posts new subreddit submissions to a configured server channel. Use `[p]redditwatch setsubreddit <name>`, `[p]redditwatch setchannel #channel`, and `[p]redditwatch setinterval <minutes>` to configure it (5-minute default; 1-minute minimum). |
 | `secretpolice` | Fines or jails members who use configured words such as “uwu” or “owo.” |
 | `sentientpants` | Experimental conversation-mode cog with an unfinished Stable Diffusion command. |
 | `stablediff` | Generates images through a self-hosted Stable Diffusion (AUTOMATIC1111) web UI. |

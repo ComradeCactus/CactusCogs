@@ -1,0 +1,11 @@
+{
+    "author": ["ComradeCactus"],
+    "name": "redditwatch",
+    "short": "Post new Reddit submissions in a configured Discord channel.",
+    "description": "Poll a subreddit and post new submissions in a configured server channel.",
+    "install_msg": "Use `[p]redditwatch setsubreddit <name>`, `[p]redditwatch setchannel #channel`, and `[p]redditwatch setinterval <minutes>` to configure the watcher. The default interval is 5 minutes.",
+    "requirements": [],
+    "tags": ["reddit", "notifications", "utility"],
+    "min_python_version": [3, 8, 0],
+    "end_user_data_statement": "This cog does not store end user data."
+}

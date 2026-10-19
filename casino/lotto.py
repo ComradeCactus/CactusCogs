@@ -8,6 +8,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+MAX_TICKETS_PER_USER = 5000
+
+
+class LottoTicketLimitError(ValueError):
+    pass
+
 
 def parse_draw_time(value):
     if not isinstance(value, str) or not re.fullmatch(r"\d{2}:\d{2}", value):
@@ -128,6 +134,17 @@ class LottoStore:
         async with self._lock:
             data = await self._run_io(self._read)
             guild_data = self._guild_data(data, guild_id)
+            today = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).date().isoformat()
+            active_ticket_count = sum(
+                ticket["user_id"] == int(user_id) and ticket["draw_date"] >= today
+                for ticket in guild_data.get("tickets", [])
+            )
+            if active_ticket_count + len(numbers_list) > MAX_TICKETS_PER_USER:
+                raise LottoTicketLimitError(
+                    "A user cannot have more than {} active lotto tickets.".format(
+                        MAX_TICKETS_PER_USER
+                    )
+                )
             draw_date = next_draw_at(
                 draw_time, now=now, last_drawn=guild_data.get("last_drawn")
             ).date().isoformat()

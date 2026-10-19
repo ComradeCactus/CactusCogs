@@ -17,6 +17,8 @@ from .games import Core, Blackjack, Double, War
 from .utils import is_input_unsupported
 from .engine import GameEngine
 from .lotto import (
+    MAX_TICKETS_PER_USER,
+    LottoTicketLimitError,
     LottoStore,
     classify_tickets,
     draw_numbers,
@@ -888,6 +890,16 @@ class Casino(Database, commands.Cog):
             ticket_count = 1
         if ticket_count < 1:
             return await ctx.send(_("Buy at least one ticket."))
+        today = datetime.now(timezone.utc).date().isoformat()
+        active_tickets = await self.lotto_store.tickets_for_user(
+            ctx.guild.id, ctx.author.id, today
+        )
+        if len(active_tickets) + ticket_count > MAX_TICKETS_PER_USER:
+            return await ctx.send(
+                _("You can have at most {} active lotto tickets.").format(
+                    humanize_number(MAX_TICKETS_PER_USER)
+                )
+            )
         guild_config = self.config.guild(ctx.guild)
         draw_time_text = await guild_config.lotto_time()
         channel_id = await guild_config.lotto_channel()
@@ -932,6 +944,16 @@ class Casino(Database, commands.Cog):
                 draw_time,
                 ctx.author.id,
                 tickets_to_add,
+            )
+        except LottoTicketLimitError:
+            try:
+                await bank.deposit_credits(ctx.author, total_cost)
+            except BalanceTooHigh as exc:
+                await bank.set_balance(ctx.author, exc.max_balance)
+            return await ctx.send(
+                _("You can have at most {} active lotto tickets. Your credits were refunded.").format(
+                    humanize_number(MAX_TICKETS_PER_USER)
+                )
             )
         except (OSError, ValueError):
             try:

@@ -2,7 +2,10 @@ import asyncio
 import json
 from datetime import datetime, time, timedelta, timezone
 
+import pytest
+
 from casino.lotto import (
+    LottoTicketLimitError,
     LottoStore,
     classify_tickets,
     draw_numbers,
@@ -98,6 +101,26 @@ def test_json_ticket_store_persists_and_expires_tickets(tmp_path):
         expired = await reloaded.expire_before(7, "2026-10-05")
         assert expired == entries
         assert await reloaded.tickets(7) == []
+
+    asyncio.run(run_test())
+
+
+def test_user_ticket_limit_is_checked_atomically(tmp_path):
+    async def run_test():
+        store = LottoStore(tmp_path / "lotto.json")
+        now = datetime(2026, 10, 4, 19, 0, tzinfo=timezone.utc)
+        draw_time = time(20, 0)
+        ticket = [0, 1, 2, 3, 4, 5]
+        await store.add_tickets(7, draw_time, 42, [ticket] * 4999, now=now)
+
+        with pytest.raises(LottoTicketLimitError):
+            await store.add_tickets(7, draw_time, 42, [ticket, ticket], now=now)
+        assert len(await store.tickets_for_user(7, 42, "2026-10-04")) == 4999
+
+        await store.add_tickets(7, draw_time, 42, [ticket], now=now)
+        with pytest.raises(LottoTicketLimitError):
+            await store.add_tickets(7, draw_time, 42, [ticket], now=now)
+        assert len(await store.tickets_for_user(7, 42, "2026-10-04")) == 5000
 
     asyncio.run(run_test())
 
