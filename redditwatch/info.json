@@ -2,7 +2,7 @@
     "author": ["ComradeCactus"],
     "name": "redditwatch",
     "short": "Post new Reddit submissions in a configured Discord channel.",
-    "description": "Poll a subreddit and post new submissions in a configured server channel.",
+    "description": "Poll a subreddit's public RSS feed and post new submissions in a configured server channel.",
     "install_msg": "Use `[p]redditwatch setsubreddit <name>`, `[p]redditwatch setchannel #channel`, and `[p]redditwatch setinterval <minutes>` to configure the watcher. The default interval is 5 minutes.",
     "requirements": [],
     "tags": ["reddit", "notifications", "utility"],

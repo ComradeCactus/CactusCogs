@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import time
+import xml.etree.ElementTree as ET
 
 import aiohttp
 import discord
@@ -11,7 +12,8 @@ from redbot.core import Config, checks, commands
 
 log = logging.getLogger("red.cactuscogs.redditwatch")
 SUBREDDIT_RE = re.compile(r"^[A-Za-z0-9_]{2,21}$")
-REDDIT_URL = "https://www.reddit.com/r/{}/new.json?limit=25"
+REDDIT_RSS_URL = "https://www.reddit.com/r/{}/new/.rss?limit=25"
+ATOM_NAMESPACE = "{http://www.w3.org/2005/Atom}"
 
 
 class RedditWatch(commands.Cog):
@@ -90,30 +92,35 @@ class RedditWatch(commands.Cog):
         )
 
     async def _fetch_posts(self, session: aiohttp.ClientSession, subreddit: str):
-        async with session.get(REDDIT_URL.format(subreddit)) as response:
+        async with session.get(REDDIT_RSS_URL.format(subreddit)) as response:
             response.raise_for_status()
-            payload = await response.json(content_type=None)
+            payload = await response.text()
 
         try:
-            children = payload["data"]["children"]
+            feed = ET.fromstring(payload)
             posts = []
-            for child in children:
-                post = child["data"]
-                post_id = post["id"]
-                title = post["title"]
-                permalink = post["permalink"]
+            for entry in feed.findall(f"{ATOM_NAMESPACE}entry"):
+                entry_id = entry.findtext(f"{ATOM_NAMESPACE}id")
+                title = entry.findtext(f"{ATOM_NAMESPACE}title")
+                link = entry.find(f"{ATOM_NAMESPACE}link")
+                permalink = link.get("href") if link is not None else None
+                post_id = entry_id[3:] if entry_id and entry_id.startswith("t3_") else entry_id
                 if not all(isinstance(value, str) and value for value in (post_id, title, permalink)):
                     raise ValueError("Reddit returned a post with invalid fields.")
                 posts.append(
                     {
                         "id": post_id,
                         "title": title,
-                        "url": f"https://www.reddit.com{permalink}",
+                        "url": (
+                            permalink
+                            if permalink.startswith(("https://", "http://"))
+                            else f"https://www.reddit.com{permalink}"
+                        ),
                     }
                 )
             return posts
-        except (KeyError, TypeError) as exc:
-            raise ValueError("Reddit returned an unexpected response.") from exc
+        except ET.ParseError as exc:
+            raise ValueError("Reddit returned an invalid Atom feed.") from exc
 
     @tasks.loop(seconds=30)
     async def check_subreddits(self):
@@ -149,6 +156,14 @@ class RedditWatch(commands.Cog):
                             continue
                         fetched[subreddit] = await self._fetch_posts(session, subreddit)
                     posts = fetched[subreddit]
+                except aiohttp.ClientResponseError as exc:
+                    failed.add(subreddit)
+                    log.error(
+                        "Failed to fetch new posts for r/%s: Reddit returned HTTP %s.",
+                        subreddit,
+                        exc.status,
+                    )
+                    continue
                 except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                     failed.add(subreddit)
                     log.exception("Failed to fetch new posts for r/%s.", subreddit)
